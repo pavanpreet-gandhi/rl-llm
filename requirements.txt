@@ -1,5 +1,6 @@
-# babyai
-blosc
-git+https://github.com/flowersteam/Grounding_LLMs_with_online_RL.git#egg=babyai&subdirectory=babyai-text/babyai
-git+https://github.com/flowersteam/Grounding_LLMs_with_online_RL.git#egg=gym-minigrid&subdirectory=babyai-text/gym-minigrid
-git+https://github.com/flowersteam/Grounding_LLMs_with_online_RL.git#egg=babyai-text&subdirectory=babyai-text
+# install babyai_text by cloning https://github.com/flowersteam/Grounding_LLMs_with_online_RL
+# and follow the instructions in the README of the babyai-text folder
+ipykernel
+ipython
+ipywidgets
+tqdm
