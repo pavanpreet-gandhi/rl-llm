@@ -2,6 +2,7 @@ import logging
 import os
 from datetime import datetime
 
+
 def create_logger(name: str, log_dir: str = "logs") -> logging.Logger:
     """
     Create and configure a logger with both file and console handlers.
@@ -41,3 +42,27 @@ def create_logger(name: str, log_dir: str = "logs") -> logging.Logger:
     logger.addHandler(console_handler)
     
     return logger
+
+
+def get_system_prompt() -> str:
+    """
+    Load the system prompt from a text file.
+    
+    Returns:
+        str: The system prompt
+    """
+    with open("resources/system_prompt.txt", "r") as f:
+        system_prompt = f.read()
+    return system_prompt
+
+
+action_to_text = {
+    0: 'turn left',
+    1: 'turn right',
+    2: 'go forward',
+    3: 'pick up',
+    4: 'drop',
+    5: 'toggle',
+    6: 'done',
+}
+text_to_action = {v: k for k, v in action_to_text.items()}
