@@ -4,6 +4,7 @@ ipykernel
 ipython
 ipywidgets
 tqdm
+rich
 torch
 transformers
 trl==0.11.4
