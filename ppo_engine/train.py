@@ -76,12 +76,12 @@ def setup_training(args, logger: logging.Logger):
     }
     logger.info("Set up generation kwargs")
     
-    return env, trainer, tokenizer, generation_kwargs
+    return env, trainer, tokenizer, generation_kwargs, device
 
 
 def train(args, logger: logging.Logger):
     
-    env, trainer, tokenizer, generation_kwargs = setup_training(args, logger)
+    env, trainer, tokenizer, generation_kwargs, device = setup_training(args, logger)
     
     logger.info("Starting training loop")
     for step in tqdm(range(args.num_steps_train)):
@@ -93,7 +93,12 @@ def train(args, logger: logging.Logger):
         while len(rewards) < args.batch_size:
             
             query_tensors_ep, response_tensors_ep, rewards_ep, messages_ep = sample_trajectory(
-                env, trainer, tokenizer, generation_kwargs, args.max_steps_env
+                env=env, 
+                trainer=trainer, 
+                tokenizer=tokenizer, 
+                generation_kwargs=generation_kwargs, 
+                device=device, 
+                max_steps=args.max_steps_env, 
             )
             query_tensors.extend(query_tensors_ep)
             response_tensors.extend(response_tensors_ep)
@@ -108,8 +113,8 @@ def train(args, logger: logging.Logger):
         rewards = rewards[:args.batch_size]
         
         # Train
-        break
-        
+        stats = trainer.step(query_tensors, response_tensors, rewards)
+        logger.info(f"Training step {step}: {stats}")
 
 if __name__ == "__main__":
     logger = utils.create_logger("train")
