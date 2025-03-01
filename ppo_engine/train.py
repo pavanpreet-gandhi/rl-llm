@@ -19,6 +19,8 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
     """
     Parse command line arguments.
     TODO: Implement argument parsing using argparse or similar library.
+    TODO: Other hyperparameters (e.g. learning_rate, ppo_epochs, kl stuff, cliprange, vf_coeff, whiten_rewards, etc.)
+    TODO: Choose generation kwargs
     """
     args = {
         # Others
@@ -114,7 +116,13 @@ def train(args, logger: logging.Logger):
         
         # Train
         stats = trainer.step(query_tensors, response_tensors, rewards)
-        logger.info(f"Training step {step}: {stats}")
+
+        # Log stats TODO: tensorboard or wandb
+        trainer.log_stats(stats, {'query': query_tensors, 'response': response_tensors}, rewards, 
+            columns_to_log=['reward_mean', 'reward_std', 'objective/kl', 'ppo/policy_loss', 'ppo/value_loss']
+        )
+        logger.info(f"Training step {step} completed")
+
 
 if __name__ == "__main__":
     logger = utils.create_logger("train")
