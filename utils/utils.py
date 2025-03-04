@@ -68,13 +68,15 @@ def get_system_prompt() -> str:
     return system_prompt
 
 
-action_to_text = {
-    0: 'turn left',
-    1: 'turn right',
-    2: 'go forward',
-    3: 'pick up',
-    4: 'drop',
-    5: 'toggle',
-    6: 'done',
-}
+action_list = [
+    'turn left',
+    'turn right',
+    'go forward',
+    'pick up',
+    'drop',
+    'toggle',
+    'done',
+]
+
+action_to_text = {i: a for i, a in enumerate(action_list)}
 text_to_action = {v: k for k, v in action_to_text.items()}

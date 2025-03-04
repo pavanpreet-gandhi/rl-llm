@@ -20,7 +20,7 @@ def sample_trajectory(
     Backfill the rewards for each observation-action pair according to the final reward received.
     
     Args:
-        env (Env): The environment to sample from.
+        env (Env): The environments to sample from.
         trainer (PPOTrainer): The PPO trainer containing the current policy.
         tokenizer (PreTrainedTokenizer): The tokenizer used for encoding actions.
         generation_kwargs (Dict[str, Any]): Generation parameters for the policy.

@@ -13,7 +13,7 @@ from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create
 
 import utils
 from sample_trajectory import sample_trajectory
-
+from inference_engine.babyai_text_env import BabyAITextEnv
 
 def parse_args(logger: logging.Logger) -> Dict[str, Any]:
     """
@@ -29,6 +29,11 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "num_shared_layers": 6,
         "max_steps_env": 5,
         "num_steps_train": 5,
+
+        # Environment config
+        "seed": 42,
+        "num_envs": 4,
+        "action_space": utils.action_list,
         
         # PPO config
         "batch_size": 4,
@@ -52,8 +57,8 @@ def setup_training(args, logger: logging.Logger):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
-    env = gym.make(args.env_id)
-    logger.info(f"Created environment: {args.env_id}")
+    env = BabyAITextEnv(args)
+    logger.info(f"Created {args.num_envs} environments with id: {args.env_id} and seed: {args.seed}")
     
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id).to(device)
