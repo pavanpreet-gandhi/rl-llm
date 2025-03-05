@@ -10,6 +10,7 @@ import babyai_text
 import torch
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
+from peft import LoraConfig, get_peft_model
 
 import utils
 from sample_trajectory import sample_trajectory
@@ -41,6 +42,13 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "top_p": 0.95,
         "temperature": 0.8,
         # "repetition_penalty": 1.0,
+
+        # PEFT config
+        "use_peft": True,
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.05,
+        "lora_bias": "none",
     }
     args = SimpleNamespace(**args)
     logger.info(f"Parsed arguments: {args}")
@@ -54,9 +62,22 @@ def setup_training(args, logger: logging.Logger):
     
     env = gym.make(args.env_id)
     logger.info(f"Created environment: {args.env_id}")
+
+    if args.use_peft:
+        peft_config = LoraConfig(
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            bias=args.lora_bias,
+            task_type="CAUSAL_LM",
+        )
+        logger.info(f"Using PEFT config: {peft_config}")
+    else:
+        peft_config = None
+        logger.info("Not using PEFT")
     
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-    model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id).to(device)
+    model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id, peft_config=peft_config).to(device)
     logger.info("Loaded model and tokenizer")
     
     ref_model = create_reference_model(model, num_shared_layers=args.num_shared_layers)
