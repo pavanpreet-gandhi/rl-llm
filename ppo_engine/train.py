@@ -74,7 +74,7 @@ def setup_training(args, logger: logging.Logger):
             bias=args.lora_bias,
             task_type="CAUSAL_LM",
         )
-        logger.info(f"Using PEFT config: {peft_config}")
+        logger.info(f"Using PEFT")
     else:
         peft_config = None
         logger.info("Not using PEFT")
@@ -89,7 +89,8 @@ def setup_training(args, logger: logging.Logger):
     config = PPOConfig(
         batch_size=args.batch_size, 
         mini_batch_size=args.mini_batch_size,
-        exp_name=logger.name,
+        is_peft_model=args.use_peft,
+        exp_name=args.experiment_name,
         log_with="wandb",
     )
     trainer = PPOTrainer(config, model, ref_model, tokenizer)
