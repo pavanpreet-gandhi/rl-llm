@@ -159,7 +159,7 @@ def train(args, logger: logging.Logger):
 
 if __name__ == "__main__":
     args = parse_args()
+    wandb.init(project=args.project_name, name=args.experiment_name)
     logger = utils.create_logger(args.experiment_name, console_output=True)
-    wandb.init(project=args.project_name, name=logger.name)
     logger.info(f"Using arguments: {args}")
     train(args, logger)
