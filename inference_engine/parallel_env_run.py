@@ -9,6 +9,7 @@ from ppo_engine.sample_trajectory import sample_trajectory
 import logging
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
 from transformers import AutoTokenizer
+import utils
 
 
 logger = logging.getLogger(__name__)
@@ -19,14 +20,32 @@ def multi_worker(conn, envs):
     """Target for a subprocess that handles a set of envs"""
     while True:
         cmd, data = conn.recv()
-        # generate_trajectories(trainer, tokenizer, generation_kwargs, device, max_steps)
-        if cmd == "generate_trajectories":
+        # step(actions, stop_mask, device)
+        if cmd == "step":
+            ret = []
+            device = data[2]
+            for env, a, stopped in zip(envs, data[0], data[1]):
+                if a not in utils.text_to_action:
+                    text_obs = "You entered an invalid action, the valid actions are: " + str(list(utils.text_to_action.keys()))
+                    reward = -0.1
+                    done = False
+                    ret.append((None, reward, done, {"descriptions": text_obs}))
+                elif not stopped:
+                    action = utils.text_to_action[a]
+                    obs, reward, done, info = env.step(action)
+                    reward = torch.tensor(reward).to(device)
+                    if done:
+                        obs, info = env.reset()
+                    ret.append((obs, reward, done, info))
+                else:
+                    ret.append((None, 0, False, None))
+            conn.send(ret)
+        # reset()
+        elif cmd == "reset":
             ret = []
             for env in envs:
-                query_tensors, response_tensors, rewards, messages = sample_trajectory(
-                    env, data[0], data[1], data[2], data[3], data[4]
-                )
-                ret.append((query_tensors, response_tensors, rewards, messages))
+                obs, info = env.reset()
+                ret.append((obs, info))
             conn.send(ret)
         # render_one()
         elif cmd == "render_one":
@@ -90,11 +109,26 @@ class ParallelTrajectory:
         logger.info("Set up generation kwargs")
 
         self.max_steps = config_dict.max_steps_env
+        self.query_tensors, self.response_tensors, self.rewards, self.messages = [], [], [], []
+
+        # Setup arrays to hold current observation and timestep
+        # for each environment
+        self.obss = []
+        self.ts = np.array([0 for _ in range(self.n_parallel)])
 
         # Spin up subprocesses
         self.locals = []
         self.processes = []
         self.start_processes()
+        init_obs, init_info = self.reset()
+        self.missions = [obs["mission"] for obs in init_obs]
+        system_prompt = utils.get_system_prompt()
+        system_prompts = [system_prompt.replace("{{goal}}", mission) for mission in self.missions]
+        self.messages = [{"role": "system", "content": system_prompt} for system_prompt in system_prompts]
+        for i, sub_message in enumerate(self.messages):
+            sub_message.append({"role": "user", "content": "\n".join(init_info[i]["descriptions"])})
+
+        self.done_mask = np.array([False for _ in range(self.n_parallel)])
 
     def __len__(self):
         return self.n_parallel
@@ -131,20 +165,107 @@ class ParallelTrajectory:
             remote.close()
             self.processes.append(p)
         logger.info("done spinning up processes")
-    
-    def generate_trajectories(self):
-        """Generate trajectories for all environments"""
+
+    def request_reset_envs(self):
+        """Request all processes to reset their envs"""
+        logger.info("requesting resets")
+        for local in self.locals:
+            local.send(("reset", None))
+        self.obss = []
+        logger.info("requested resets")
+
+        infos = []
+        for local in self.locals:
+            res = local.recv()
+
+            for j in range(len(res)):
+                infos.append(res[j][1])
+                if res[j][0] is not None:
+                    self.obss += [res[j][0]]
+        logger.info("completed resets")
+        return infos
+
+    def reset(self):
+        """Reset all environments"""
+        infos = self.request_reset_envs()
+        return [obs for obs in self.obss], infos
+
+    def request_step(self, actions, stop_mask):
+        """Request processes to step corresponding to (primitive) actions
+           unless stop mask indicates otherwise"""
         for i in range(0, self.n_parallel, self.envs_per_proc):
             self.locals[i // self.envs_per_proc].send(
-                ("generate_trajectories", [self.trainer, self.tokenizer, self.generation_kwargs, self.device, self.max_steps])
+                ("step", [actions[i:i + self.envs_per_proc],
+                          stop_mask[i:i + self.envs_per_proc], self.device])
             )
-        ret_query_tensors, ret_response_tensors, ret_rewards, ret_messages = [], [], [], []
+        results = []
         for i in range(0, self.n_parallel, self.envs_per_proc):
             res = self.locals[i // self.envs_per_proc].recv()
             for j in range(len(res)):
-                query_tensors, response_tensors, rewards, messages = res[j]
-                ret_query_tensors += query_tensors
-                ret_response_tensors += response_tensors
-                ret_rewards += rewards
-                ret_messages += messages
-        return ret_query_tensors, ret_response_tensors, ret_rewards, ret_messages
+                results.append(res[j])
+                if results[-1][0] != None:
+                    self.obss[i + j] = results[-1][0]
+        return zip(*results)
+
+    def step(self, action_texts):
+        """Complete a step and evaluate low-level policy / termination
+           classifier as needed depending on reward shaping scheme.
+           
+           Returns:  obs: list of environment observations,
+                     reward: np.array of extrinsic rewards,
+                     done: np.array of booleans,
+                     info: depends on self.reward_shaping. Output can be used
+                           to shape the reward.
+        """
+        # Make sure input is numpy array
+        if type(action_texts) != np.ndarray:
+            if type(action_texts) == list or type(action_texts) == str:
+                action_texts = np.array(action_texts)
+            elif type(action_texts) == torch.Tensor:
+                action_texts = action_texts.cpu().numpy()
+            else:
+                raise TypeError
+        actions_to_take = action_texts.copy()
+
+        # Make a step in the environment
+        stop_mask = np.array([False for _ in range(self.n_parallel)])
+        obs, reward, done, info = self.request_step(actions_to_take, stop_mask)
+        reward = np.array(reward)
+        done_mask = np.array(done)
+
+        self.ts += 1
+        self.ts[done_mask] *= 0
+
+        return [obs for obs in self.obss], reward, done_mask, info
+
+    def generate_actions(self):
+        query_tensors = self.tokenizer.apply_chat_template(self.messages, return_tensors="pt", add_generation_prompt=True).to(self.device)
+        query_tensors_list = list(query_tensors.unbind(dim=0))
+        self.query_tensors.append(query_tensors_list)
+
+        response_tensors = self.trainer.generate(query_tensors_list, **self.generation_kwargs, return_prompt=False)
+        response_tensors = response_tensors.squeeze(0)
+        self.response_tensors.append(response_tensors)
+
+        action_texts = self.tokenizer.batch_decode(response_tensors)
+        for i, sub_message in enumerate(self.messages):
+            sub_message.append({"role": "assistant", "content": action_texts[i]})
+        return action_texts
+    
+    def generate_trajectories(self):
+        """Generate trajectories for all environments"""
+        for i in range(self.max_steps):
+            if all([done for done in self.done_mask]):
+                break
+            action_texts = self.generate_actions()
+            obs, reward, done, info = self.step(action_texts)
+            self.rewards.append(reward)
+            for im, m in enumerate(self.messages):
+                m.append({"role": "user", "content": "\n".join(info[im]["descriptions"])})
+            for j, this_done in enumerate(done):
+                if this_done:
+                    self.done_mask[j] = True
+                    final_reward = reward[j]
+                    for k in range(i-1):
+                        self.rewards[k][j] += final_reward
+        return self.query_tensors, self.response_tensors, self.rewards, self.messages

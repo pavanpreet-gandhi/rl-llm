@@ -140,22 +140,17 @@ def parallel_train(args, logger: logging.Logger):
         
         # Collect experiences
         logger.info("Collecting experiences")
-        query_tensors, response_tensors, rewards, messages = [], [], [], []
         
         while len(rewards) < args.batch_size:
             
-            query_tensors_ep, response_tensors_ep, rewards_ep, messages_ep = parallel_trajectory.generate_trajectories()
-            query_tensors.extend(query_tensors_ep)
-            response_tensors.extend(response_tensors_ep)
-            rewards.extend(rewards_ep)
-            messages.extend(messages_ep)
+            parallel_trajectory.generate_trajectories()
             
-            logger.info(f"Collected {len(rewards)} experiences")
-            logger.info(f"Messages: {messages}")
+            logger.info(f"Collected {len(parallel_trajectory.rewards)} experiences")
+            logger.info(f"Messages: {parallel_trajectory.messages}")
         
-        query_tensors = query_tensors[:args.batch_size]
-        response_tensors = response_tensors[:args.batch_size]
-        rewards = rewards[:args.batch_size]
+        query_tensors = parallel_trajectory.query_tensors[(step * args.batch_size):((step + 1) * args.batch_size)]
+        response_tensors = parallel_trajectory.response_tensors[(step * args.batch_size):((step + 1) * args.batch_size)]
+        rewards = parallel_trajectory.rewards[(step * args.batch_size):((step + 1) * args.batch_size)]
         
         # Train
         stats = parallel_trajectory.trainer.step(query_tensors, response_tensors, rewards)
