@@ -30,7 +30,7 @@ def create_logger(name: str, log_dir: str = "logs", console_output: bool = False
     
     # File handler
     file_handler = logging.FileHandler(
-        os.path.join(log_dir, f'{name}_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+        os.path.join(log_dir, f'{name}.log')
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(file_formatter)

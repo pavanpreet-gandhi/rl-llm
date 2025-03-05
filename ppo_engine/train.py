@@ -11,6 +11,7 @@ import torch
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
 from peft import LoraConfig, get_peft_model
+import wandb
 
 import utils
 from sample_trajectory import sample_trajectory
@@ -25,6 +26,7 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
     """
     args = {
         # Others
+        "project_name": "babyai-ppo",
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
@@ -56,6 +58,8 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
 
 
 def setup_training(args, logger: logging.Logger):
+
+    wandb.init(project=args.project_name, name=logger.name)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
@@ -85,7 +89,9 @@ def setup_training(args, logger: logging.Logger):
     
     config = PPOConfig(
         batch_size=args.batch_size, 
-        mini_batch_size=args.mini_batch_size
+        mini_batch_size=args.mini_batch_size,
+        exp_name=logger.name,
+        log_with="wandb",
     )
     trainer = PPOTrainer(config, model, ref_model, tokenizer)
     logger.info("Initialized PPO Trainer")
@@ -135,18 +141,20 @@ def train(args, logger: logging.Logger):
         response_tensors = response_tensors[:args.batch_size]
         rewards = rewards[:args.batch_size]
         
-        # Train
+        # Train step
         stats = trainer.step(query_tensors, response_tensors, rewards)
 
-        # Log stats TODO: tensorboard or wandb
-        trainer.log_stats(stats, {'query': query_tensors, 'response': response_tensors}, rewards, 
-            columns_to_log=['reward_mean', 'reward_std', 'objective/kl', 'ppo/policy_loss', 'ppo/value_loss']
-        )
+        # Log stats
+        query = tokenizer.batch_decode(query_tensors, skip_special_tokens=True)
+        response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
+        batch = {'query': query, 'response': response}
+        trainer.log_stats(stats, batch, rewards)
         logger.info(f"Training step {step} completed")
 
 
 if __name__ == "__main__":
-    logger = utils.create_logger("train")
+    name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    logger = utils.create_logger(name, console_output=True)
     args = parse_args(logger)
     train(args, logger)
     
