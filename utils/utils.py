@@ -20,6 +20,7 @@ def create_logger(name: str, log_dir: str = "logs", console_output: bool = False
     # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
+    logger.propagate = False
     
     # Create log directory if it doesn't exist
     os.makedirs(log_dir, exist_ok=True)
