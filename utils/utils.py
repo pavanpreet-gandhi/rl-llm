@@ -63,7 +63,7 @@ def get_system_prompt() -> str:
     Returns:
         str: The system prompt
     """
-    with open("resources/system_prompt.txt", "r") as f:
+    with open("rl-llm/resources/system_prompt.txt", "r") as f:
         system_prompt = f.read()
     return system_prompt
 

@@ -11,6 +11,9 @@ import torch
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
 
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import utils
 from sample_trajectory import sample_trajectory
 from inference_engine.babyai_text_env import BabyAITextEnv
