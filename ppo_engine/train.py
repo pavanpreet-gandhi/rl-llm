@@ -17,16 +17,16 @@ import utils
 from sample_trajectory import sample_trajectory
 
 
-def parse_args(logger: logging.Logger) -> Dict[str, Any]:
+def parse_args() -> Dict[str, Any]:
     """
-    Parse command line arguments.
-    TODO: Implement argument parsing using argparse or similar library.
+    Parse command training configuration arguments.
     TODO: Other hyperparameters (e.g. learning_rate, ppo_epochs, kl stuff, cliprange, vf_coeff, whiten_rewards, etc.)
     TODO: Choose generation kwargs
     """
     args = {
         # Others
         "project_name": "babyai-ppo",
+        "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
@@ -52,15 +52,14 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "lora_dropout": 0.05,
         "lora_bias": "none",
     }
-    args = SimpleNamespace(**args)
-    logger.info(f"Parsed arguments: {args}")
+    args = SimpleNamespace(**args) # same type as argparse would return
     return args
 
 
 def setup_training(args, logger: logging.Logger):
-
-    wandb.init(project=args.project_name, name=logger.name)
-    
+    """
+    Set up everything required for training.
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
@@ -109,7 +108,13 @@ def setup_training(args, logger: logging.Logger):
 
 
 def train(args, logger: logging.Logger):
-    
+    """
+    Main training loop.
+        1. Collect experiences
+        2. Train PPO
+        3. Log stats
+        4. Repeat
+    """
     env, trainer, tokenizer, generation_kwargs, device = setup_training(args, logger)
     
     logger.info("Starting training loop")
@@ -153,8 +158,8 @@ def train(args, logger: logging.Logger):
 
 
 if __name__ == "__main__":
-    name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    logger = utils.create_logger(name, console_output=True)
-    args = parse_args(logger)
+    args = parse_args()
+    logger = utils.create_logger(args.experiment_name, console_output=True)
+    wandb.init(project=args.project_name, name=logger.name)
+    logger.info(f"Using arguments: {args}")
     train(args, logger)
-    
