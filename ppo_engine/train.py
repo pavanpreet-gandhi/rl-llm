@@ -16,7 +16,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import utils
 from sample_trajectory import sample_trajectory
-from inference_engine.babyai_text_env import BabyAITextEnv
+from inference_engine.parallel_env_run import ParallelTrajectory
 
 def parse_args(logger: logging.Logger) -> Dict[str, Any]:
     """
@@ -60,8 +60,8 @@ def setup_training(args, logger: logging.Logger):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
-    env = BabyAITextEnv(args)
-    logger.info(f"Created {args.num_envs} environments with id: {args.env_id} and seed: {args.seed}")
+    env = gym.make(args.env_id)
+    logger.info(f"Created environment: {args.env_id}")
     
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
     model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id).to(device)
@@ -131,9 +131,44 @@ def train(args, logger: logging.Logger):
         )
         logger.info(f"Training step {step} completed")
 
+def parallel_train(args, logger: logging.Logger):
+    
+    parallel_trajectory = ParallelTrajectory(args)
+    
+    logger.info("Starting parallel training loop")
+    for step in tqdm(range(args.num_steps_train)):
+        
+        # Collect experiences
+        logger.info("Collecting experiences")
+        query_tensors, response_tensors, rewards, messages = [], [], [], []
+        
+        while len(rewards) < args.batch_size:
+            
+            query_tensors_ep, response_tensors_ep, rewards_ep, messages_ep = parallel_trajectory.generate_trajectories()
+            query_tensors.extend(query_tensors_ep)
+            response_tensors.extend(response_tensors_ep)
+            rewards.extend(rewards_ep)
+            messages.extend(messages_ep)
+            
+            logger.info(f"Collected {len(rewards)} experiences")
+            logger.info(f"Messages: {messages}")
+        
+        query_tensors = query_tensors[:args.batch_size]
+        response_tensors = response_tensors[:args.batch_size]
+        rewards = rewards[:args.batch_size]
+        
+        # Train
+        stats = parallel_trajectory.trainer.step(query_tensors, response_tensors, rewards)
+
+        # Log stats TODO: tensorboard or wandb
+        parallel_trajectory.trainer.log_stats(stats, {'query': query_tensors, 'response': response_tensors}, rewards, 
+            columns_to_log=['reward_mean', 'reward_std', 'objective/kl', 'ppo/policy_loss', 'ppo/value_loss']
+        )
+        logger.info(f"Training step {step} completed")
+
 
 if __name__ == "__main__":
     logger = utils.create_logger("train")
     args = parse_args(logger)
-    train(args, logger)
+    parallel_train(args, logger)
     
