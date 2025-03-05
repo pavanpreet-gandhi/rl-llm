@@ -5,13 +5,14 @@ from rich.logging import RichHandler
 from rich.console import Console
 from rich.theme import Theme
 
-def create_logger(name: str, log_dir: str = "logs") -> logging.Logger:
+def create_logger(name: str, log_dir: str = "logs", console_output: bool = False) -> logging.Logger:
     """
-    Create and configure a logger with both file and rich console handlers.
+    Create and configure a logger with file and optionally rich console handlers.
     
     Args:
         name (str): Name of the logger
         log_dir (str): Directory to store log files
+        console_output (bool): Whether to output logs to console (default: False)
         
     Returns:
         logging.Logger: Configured logger instance
@@ -33,25 +34,26 @@ def create_logger(name: str, log_dir: str = "logs") -> logging.Logger:
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(file_formatter)
     
-    # Rich console handler
-    console = Console(theme=Theme({
-        "logging.level.info": "cyan",
-        "logging.level.warning": "yellow",
-        "logging.level.error": "red",
-    }))
-    
-    rich_handler = RichHandler(
-        console=console,
-        rich_tracebacks=True,
-        tracebacks_show_locals=True,
-        show_time=True,
-        show_path=True
-    )
-    rich_handler.setLevel(logging.INFO)
-    
-    # Add handlers to logger
+    # Add file handler to logger
     logger.addHandler(file_handler)
-    logger.addHandler(rich_handler)
+    
+    # Only add rich console handler if console_output is True
+    if console_output:
+        console = Console(theme=Theme({
+            "logging.level.info": "cyan",
+            "logging.level.warning": "yellow",
+            "logging.level.error": "red",
+        }))
+        
+        rich_handler = RichHandler(
+            console=console,
+            rich_tracebacks=True,
+            tracebacks_show_locals=True,
+            show_time=True,
+            show_path=True
+        )
+        rich_handler.setLevel(logging.INFO)
+        logger.addHandler(rich_handler)
     
     return logger
 
