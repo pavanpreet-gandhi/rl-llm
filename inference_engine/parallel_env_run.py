@@ -10,6 +10,7 @@ import logging
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
 from transformers import AutoTokenizer
 import utils
+from torch.nn.utils.rnn import pad_sequence
 
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ class ParallelTrajectory:
         else:
             raise NotImplementedError
         
-        self.tokenizer = AutoTokenizer.from_pretrained(config_dict.model_id)
+        self.tokenizer = AutoTokenizer.from_pretrained(config_dict.model_id, padding_side="left")
         self.model = AutoModelForCausalLMWithValueHead.from_pretrained(config_dict.model_id).to(self.device)
         logger.info("Loaded model and tokenizer")
         
@@ -123,8 +124,8 @@ class ParallelTrajectory:
         init_obs, init_info = self.reset()
         self.missions = [obs["mission"] for obs in init_obs]
         system_prompt = utils.get_system_prompt()
-        system_prompts = [system_prompt.replace("{{goal}}", mission) for mission in self.missions]
-        self.messages = [{"role": "system", "content": system_prompt} for system_prompt in system_prompts]
+        system_prompts = [system_prompt.replace("{goal}", mission) for mission in self.missions]
+        self.messages = [[{"role": "system", "content": system_prompt}] for system_prompt in system_prompts]
         for i, sub_message in enumerate(self.messages):
             sub_message.append({"role": "user", "content": "\n".join(init_info[i]["descriptions"])})
 
@@ -239,15 +240,17 @@ class ParallelTrajectory:
         return [obs for obs in self.obss], reward, done_mask, info
 
     def generate_actions(self):
-        query_tensors = self.tokenizer.apply_chat_template(self.messages, return_tensors="pt", add_generation_prompt=True).to(self.device)
-        query_tensors_list = list(query_tensors.unbind(dim=0))
-        self.query_tensors.append(query_tensors_list)
+        query_tensors = self.tokenizer.apply_chat_template(self.messages, return_tensors='pt', add_generation_prompt=True, padding='max_length', max_length=512, truncation=True).to(self.device)
+        self.query_tensors.append(query_tensors)
 
-        response_tensors = self.trainer.generate(query_tensors_list, **self.generation_kwargs, return_prompt=False)
-        response_tensors = response_tensors.squeeze(0)
-        self.response_tensors.append(response_tensors)
+        response_tensors = self.trainer.generate(list(query_tensors), **self.generation_kwargs, return_prompt=False)
+        response_tensors_id_dict_list = []
+        for i in range(len(response_tensors)):
+            response_tensors_id_dict_list.append({"input_ids": response_tensors[i]})
+        padded_response_tensors = self.tokenizer.pad(response_tensors_id_dict_list, return_tensors='pt', padding='max_length', max_length=self.generation_kwargs['max_new_tokens'])['input_ids']
+        self.response_tensors.append(padded_response_tensors)
 
-        action_texts = self.tokenizer.batch_decode(response_tensors)
+        action_texts = self.tokenizer.batch_decode(padded_response_tensors)
         for i, sub_message in enumerate(self.messages):
             sub_message.append({"role": "assistant", "content": action_texts[i]})
         return action_texts
@@ -261,7 +264,10 @@ class ParallelTrajectory:
             obs, reward, done, info = self.step(action_texts)
             self.rewards.append(reward)
             for im, m in enumerate(self.messages):
-                m.append({"role": "user", "content": "\n".join(info[im]["descriptions"])})
+                if reward[im] == -0.1:
+                    m.append({"role": "user", "content": info[im]["descriptions"]})
+                else:
+                    m.append({"role": "user", "content": "\n".join(info[im]["descriptions"])})
             for j, this_done in enumerate(done):
                 if this_done:
                     self.done_mask[j] = True

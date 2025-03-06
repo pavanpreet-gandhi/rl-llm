@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import utils
 from sample_trajectory import sample_trajectory
 from inference_engine.parallel_env_run import ParallelTrajectory
+import numpy as np
 
 def parse_args(logger: logging.Logger) -> Dict[str, Any]:
     """
@@ -30,7 +31,7 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
-        "max_steps_env": 5,
+        "max_steps_env": 4,
         "num_steps_train": 5,
 
         # Environment config
@@ -39,8 +40,8 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "action_space": utils.action_list,
         
         # PPO config
-        "batch_size": 4,
-        "mini_batch_size": 4,
+        "batch_size": 16,
+        "mini_batch_size": 16,
         
         # Generation kwargs
         "max_new_tokens": 20,
@@ -141,19 +142,24 @@ def parallel_train(args, logger: logging.Logger):
         # Collect experiences
         logger.info("Collecting experiences")
         
-        while len(rewards) < args.batch_size:
-            
-            parallel_trajectory.generate_trajectories()
-            
-            logger.info(f"Collected {len(parallel_trajectory.rewards)} experiences")
-            logger.info(f"Messages: {parallel_trajectory.messages}")
+        parallel_trajectory.generate_trajectories()
         
-        query_tensors = parallel_trajectory.query_tensors[(step * args.batch_size):((step + 1) * args.batch_size)]
-        response_tensors = parallel_trajectory.response_tensors[(step * args.batch_size):((step + 1) * args.batch_size)]
-        rewards = parallel_trajectory.rewards[(step * args.batch_size):((step + 1) * args.batch_size)]
+        logger.info(f"Collected {len(parallel_trajectory.rewards)} experiences")
+        logger.info(f"Messages: {parallel_trajectory.messages}")
         
+        query_tensors = parallel_trajectory.query_tensors[(step * args.max_steps_env):((step + 1) * args.max_steps_env)] # shape: (max_steps_env, num_envs, messages_length)
+        response_tensors = parallel_trajectory.response_tensors[(step * args.max_steps_env):((step + 1) * args.max_steps_env)] # shape: (max_steps_env, num_envs, new_tokens)
+        rewards = parallel_trajectory.rewards[(step * args.max_steps_env):((step + 1) * args.max_steps_env)] # shape: (max_steps_env, num_envs)
+        
+        batch_query_tensors = torch.stack(query_tensors, dim=0)
+        batch_response_tensors = torch.stack(response_tensors, dim=0)
+        batch_rewards = torch.tensor(np.array(rewards))
+        batch_query_tensors = batch_query_tensors.view(-1, batch_query_tensors.size(-1)) # shape: (max_steps_env * num_envs, messages_length)
+        batch_response_tensors = batch_response_tensors.view(-1, batch_response_tensors.size(-1)) # shape: (max_steps_env * num_envs, new_tokens)
+        batch_rewards = batch_rewards.view(-1) # shape: (max_steps_env * num_envs)
+
         # Train
-        stats = parallel_trajectory.trainer.step(query_tensors, response_tensors, rewards)
+        stats = parallel_trajectory.trainer.step(list(batch_query_tensors), list(batch_response_tensors), list(batch_rewards))
 
         # Log stats TODO: tensorboard or wandb
         parallel_trajectory.trainer.log_stats(stats, {'query': query_tensors, 'response': response_tensors}, rewards, 
