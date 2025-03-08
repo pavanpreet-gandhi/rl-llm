@@ -8,16 +8,14 @@ from tqdm import tqdm
 import gym
 import babyai_text
 import torch
+import numpy as np
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
 
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import utils
 from sample_trajectory import sample_trajectory
 from inference_engine.parallel_env_run import ParallelTrajectory
-import numpy as np
+
 
 def parse_args(logger: logging.Logger) -> Dict[str, Any]:
     """
@@ -40,8 +38,8 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "action_space": utils.action_list,
         
         # PPO config
-        "batch_size": 16,
-        "mini_batch_size": 16,
+        "batch_size": 4,
+        "mini_batch_size": 4,
         
         # Generation kwargs
         "max_new_tokens": 20,
@@ -131,6 +129,7 @@ def train(args, logger: logging.Logger):
             columns_to_log=['reward_mean', 'reward_std', 'objective/kl', 'ppo/policy_loss', 'ppo/value_loss']
         )
         logger.info(f"Training step {step} completed")
+
 
 def parallel_train(args, logger: logging.Logger):
     
