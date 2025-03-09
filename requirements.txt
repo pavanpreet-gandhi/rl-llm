@@ -4,3 +4,8 @@ ipykernel
 ipython
 ipywidgets
 tqdm
+rich
+torch
+transformers
+trl==0.11.4
+numpy==1.23.1 # this specific version is required for babyai-text
