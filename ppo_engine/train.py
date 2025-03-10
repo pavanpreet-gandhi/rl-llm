@@ -38,7 +38,7 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
-        "max_steps_env": 4,
+        "max_steps_env": 6,
         "num_steps_train": 5,
         # Environment config
         "seed": 42,
