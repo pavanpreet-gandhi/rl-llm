@@ -10,20 +10,23 @@ import babyai_text
 import torch
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
+from peft import LoraConfig, get_peft_model
+import wandb
 
 import utils
 from sample_trajectory import sample_trajectory
 
 
-def parse_args(logger: logging.Logger) -> Dict[str, Any]:
+def parse_args() -> Dict[str, Any]:
     """
-    Parse command line arguments.
-    TODO: Implement argument parsing using argparse or similar library.
+    Parse command training configuration arguments.
     TODO: Other hyperparameters (e.g. learning_rate, ppo_epochs, kl stuff, cliprange, vf_coeff, whiten_rewards, etc.)
     TODO: Choose generation kwargs
     """
     args = {
         # Others
+        "project_name": "babyai-ppo",
+        "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
@@ -41,22 +44,43 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "top_p": 0.95,
         "temperature": 0.8,
         # "repetition_penalty": 1.0,
+
+        # PEFT config
+        "use_peft": True,
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "lora_dropout": 0.05,
+        "lora_bias": "none",
     }
-    args = SimpleNamespace(**args)
-    logger.info(f"Parsed arguments: {args}")
+    args = SimpleNamespace(**args) # same type as argparse would return
     return args
 
 
 def setup_training(args, logger: logging.Logger):
-    
+    """
+    Set up everything required for training.
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
     env = gym.make(args.env_id)
     logger.info(f"Created environment: {args.env_id}")
+
+    if args.use_peft:
+        peft_config = LoraConfig(
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            bias=args.lora_bias,
+            task_type="CAUSAL_LM",
+        )
+        logger.info(f"Using PEFT")
+    else:
+        peft_config = None
+        logger.info("Not using PEFT")
     
     tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-    model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id).to(device)
+    model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id, peft_config=peft_config).to(device)
     logger.info("Loaded model and tokenizer")
     
     ref_model = create_reference_model(model, num_shared_layers=args.num_shared_layers)
@@ -64,7 +88,10 @@ def setup_training(args, logger: logging.Logger):
     
     config = PPOConfig(
         batch_size=args.batch_size, 
-        mini_batch_size=args.mini_batch_size
+        mini_batch_size=args.mini_batch_size,
+        is_peft_model=args.use_peft,
+        exp_name=args.experiment_name,
+        log_with="wandb",
     )
     trainer = PPOTrainer(config, model, ref_model, tokenizer)
     logger.info("Initialized PPO Trainer")
@@ -82,7 +109,13 @@ def setup_training(args, logger: logging.Logger):
 
 
 def train(args, logger: logging.Logger):
-    
+    """
+    Main training loop.
+        1. Collect experiences
+        2. Train PPO
+        3. Log stats
+        4. Repeat
+    """
     env, trainer, tokenizer, generation_kwargs, device = setup_training(args, logger)
     
     logger.info("Starting training loop")
@@ -114,18 +147,20 @@ def train(args, logger: logging.Logger):
         response_tensors = response_tensors[:args.batch_size]
         rewards = rewards[:args.batch_size]
         
-        # Train
+        # Train step
         stats = trainer.step(query_tensors, response_tensors, rewards)
 
-        # Log stats TODO: tensorboard or wandb
-        trainer.log_stats(stats, {'query': query_tensors, 'response': response_tensors}, rewards, 
-            columns_to_log=['reward_mean', 'reward_std', 'objective/kl', 'ppo/policy_loss', 'ppo/value_loss']
-        )
+        # Log stats
+        query = tokenizer.batch_decode(query_tensors, skip_special_tokens=True)
+        response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
+        batch = {'query': query, 'response': response}
+        trainer.log_stats(stats, batch, rewards)
         logger.info(f"Training step {step} completed")
 
 
 if __name__ == "__main__":
-    logger = utils.create_logger("train")
-    args = parse_args(logger)
+    args = parse_args()
+    wandb.init(project=args.project_name, name=args.experiment_name)
+    logger = utils.create_logger(args.experiment_name, console_output=True)
+    logger.info(f"Using arguments: {args}")
     train(args, logger)
-    
