@@ -6,6 +6,7 @@ from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create
 from typing import Dict, List, Any, Tuple
 from rich.pretty import pprint
 
+
 def sample_trajectory(
     env: gym.Env,
     trainer: PPOTrainer,
@@ -82,6 +83,7 @@ def sample_trajectory(
             break
         
     return query_tensors, response_tensors, rewards, messages
+
 
 if __name__ == "__main__":
     
