@@ -176,23 +176,17 @@ def parallel_train(args, logger: logging.Logger):
         batch_query_tensors = query_tensors.to(torch.long)
         batch_response_tensors = response_tensors.to(torch.long)
 
-        # batch_query_tensors = query_tensors.to(torch.float32)
-        # batch_response_tensors = response_tensors.to(torch.float32)
-        # batch_rewards = torch.tensor(np.array(rewards), dtype=torch.float32)
-        # batch_rewards = torch.tensor(np.array(rewards), dtype=torch.float32).to(
-        #     parallel_trajectory.trainer.current_device
-        # )
         rewards = np.array(rewards, dtype=np.float32)  # Convert to float32
         batch_rewards = torch.tensor(rewards, dtype=torch.float32).to(
             parallel_trajectory.trainer.current_device
         )
 
-        print(f"Rewards dtype before log_stats: {torch.tensor(rewards).dtype}")
+        # print(f"Rewards dtype before log_stats: {torch.tensor(rewards).dtype}")
 
-        print(f"batch_query_tensors: {len(batch_query_tensors)}")
-        print(f"batch_response_tensors: {len(batch_response_tensors)}")
-        print(f"batch_rewards: {len(batch_rewards)}")
-        print(f"Expected batch size: {args.batch_size}")
+        # print(f"batch_query_tensors: {len(batch_query_tensors)}")
+        # print(f"batch_response_tensors: {len(batch_response_tensors)}")
+        # print(f"batch_rewards: {len(batch_rewards)}")
+        # print(f"Expected batch size: {args.batch_size}")
 
         # Train
         stats = parallel_trajectory.trainer.step(
