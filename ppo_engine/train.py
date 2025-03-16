@@ -6,8 +6,7 @@ from types import SimpleNamespace
 from tqdm import tqdm
 
 import sys
-
-sys.path.append("../")
+import os
 
 import gym
 import babyai_text
@@ -21,9 +20,11 @@ from trl import (
     create_reference_model,
 )
 
-import utils
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from utils import utils
 from sample_trajectory import sample_trajectory
-from inference_engine.parallel_env_run import ParallelTrajectory
+from inference_engine.parallel_env_run import ParallelTrainer
 
 
 def parse_args(logger: logging.Logger) -> Dict[str, Any]:
@@ -38,14 +39,16 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
-        "max_steps_env": 6,
+        "max_steps_env": 16,
         "num_steps_train": 5,
+        "epochs": 10,
+        "memory_size": 10,
         # Environment config
         "seed": 42,
-        "num_envs": 4,
+        "num_envs": 16,
         "action_space": utils.action_list,
         # PPO config
-        "batch_size": 4,
+        "batch_size": 96,
         "mini_batch_size": 4,
         # Generation kwargs
         "max_new_tokens": 20,
@@ -147,66 +150,8 @@ def train(args, logger: logging.Logger):
 
 def parallel_train(args, logger: logging.Logger):
 
-    parallel_trajectory = ParallelTrajectory(args)
-
-    logger.info("Starting parallel training loop")
-    for step in tqdm(range(args.num_steps_train)):
-
-        # Collect experiences
-        logger.info("Collecting experiences")
-
-        parallel_trajectory.generate_trajectories()
-
-        logger.info(f"Collected {len(parallel_trajectory.rewards)} experiences")
-        logger.info(f"Messages: {parallel_trajectory.messages}")
-
-        # Use only the last query, response, and reward tensors
-        query_tensors = parallel_trajectory.query_tensors[
-            -1
-        ]  # shape: (num_envs, messages_length)
-        response_tensors = parallel_trajectory.response_tensors[
-            -1
-        ]  # shape: (num_envs, new_tokens)
-        rewards = parallel_trajectory.rewards[-1]  # shape: (num_envs)
-
-        # Convert tensors to Long type
-        query_tensors = query_tensors.long()
-        response_tensors = response_tensors.long()
-
-        batch_query_tensors = query_tensors.to(torch.long)
-        batch_response_tensors = response_tensors.to(torch.long)
-
-        rewards = np.array(rewards, dtype=np.float32)  # Convert to float32
-        batch_rewards = torch.tensor(rewards, dtype=torch.float32).to(
-            parallel_trajectory.trainer.current_device
-        )
-
-        # print(f"Rewards dtype before log_stats: {torch.tensor(rewards).dtype}")
-
-        # print(f"batch_query_tensors: {len(batch_query_tensors)}")
-        # print(f"batch_response_tensors: {len(batch_response_tensors)}")
-        # print(f"batch_rewards: {len(batch_rewards)}")
-        # print(f"Expected batch size: {args.batch_size}")
-
-        # Train
-        stats = parallel_trajectory.trainer.step(
-            list(batch_query_tensors), list(batch_response_tensors), list(batch_rewards)
-        )
-
-        # Log stats TODO: tensorboard or wandb
-        parallel_trajectory.trainer.log_stats(
-            stats,
-            {"query": query_tensors, "response": response_tensors},
-            rewards,
-            columns_to_log=[
-                "reward_mean",
-                "reward_std",
-                "objective/kl",
-                "ppo/policy_loss",
-                "ppo/value_loss",
-            ],
-        )
-        logger.info(f"Training step {step} completed")
+    parallel_trainer = ParallelTrainer(args)
+    parallel_trainer.train()
 
 
 if __name__ == "__main__":

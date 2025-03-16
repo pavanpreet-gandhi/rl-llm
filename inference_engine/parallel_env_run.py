@@ -1,5 +1,4 @@
 import gym
-from babyai.paral_env_simple import ParallelEnv
 import torch
 import numpy as np
 from copy import deepcopy
@@ -11,6 +10,7 @@ from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create
 from transformers import AutoTokenizer
 import utils
 from torch.nn.utils.rnn import pad_sequence
+from tqdm import tqdm
 
 
 logger = logging.getLogger(__name__)
@@ -24,29 +24,29 @@ def multi_worker(conn, envs):
         # step(actions, stop_mask, device)
         if cmd == "step":
             ret = []
-            device = data[2]
-            for env, a, stopped in zip(envs, data[0], data[1]):
+            device = data[1]
+            for env, a in zip(envs, data[0]):
                 if a not in utils.text_to_action:
                     text_obs = "You entered an invalid action, the valid actions are: " + str(list(utils.text_to_action.keys()))
                     reward = -0.1
                     done = False
                     ret.append((None, reward, done, {"descriptions": text_obs}))
-                elif not stopped:
+                else:
                     action = utils.text_to_action[a]
                     obs, reward, done, info = env.step(action)
-                    reward = torch.tensor(reward).to(device)
-                    if done:
-                        obs, info = env.reset()
                     ret.append((obs, reward, done, info))
-                else:
-                    ret.append((None, 0, False, None))
             conn.send(ret)
         # reset()
+        # data contains a list of bool values indicating whether to reset the env
         elif cmd == "reset":
             ret = []
-            for env in envs:
-                obs, info = env.reset()
-                ret.append((obs, info))
+            assert len(data) == len(envs), "Bool length does not match number of envs"
+            for env, b in zip(envs, data):
+                if b:
+                    obs, info = env.reset()
+                    ret.append((obs, info))
+                else:
+                    ret.append((None, None))
             conn.send(ret)
         # render_one()
         elif cmd == "render_one":
@@ -60,7 +60,7 @@ def multi_worker(conn, envs):
         else:
             raise NotImplementedError
 
-class ParallelTrajectory:
+class ParallelTrainer:
     def __init__(self, config_dict):
         
         self.device = torch.device("cuda") if torch.cuda.is_available() \
@@ -82,12 +82,16 @@ class ParallelTrajectory:
         logger.info(f"Created {self.n_parallel} environments with id: {self.env_name} and seed: {config_dict.seed}")
 
         if "BabyAI" in self.env_name:
-            self.envs_per_proc = 64
+            self.envs_per_proc = 4
         else:
             raise NotImplementedError
         
         self.tokenizer = AutoTokenizer.from_pretrained(config_dict.model_id, padding_side="left")
         self.model = AutoModelForCausalLMWithValueHead.from_pretrained(config_dict.model_id).to(self.device)
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+        if self.model.config.pad_token_id is None:
+            self.model.config.pad_token_id = self.tokenizer.eos_token_id
         logger.info("Loaded model and tokenizer")
         
         self.ref_model = create_reference_model(self.model, num_shared_layers=config_dict.num_shared_layers)
@@ -95,7 +99,8 @@ class ParallelTrajectory:
         
         self.config = PPOConfig(
             batch_size=config_dict.batch_size, 
-            mini_batch_size=config_dict.mini_batch_size
+            mini_batch_size=config_dict.mini_batch_size,
+            ppo_epochs=config_dict.epochs
         )
         self.trainer = PPOTrainer(self.config, self.model, self.ref_model, self.tokenizer)
         logger.info("Initialized PPO Trainer")
@@ -110,26 +115,20 @@ class ParallelTrajectory:
         logger.info("Set up generation kwargs")
 
         self.max_steps = config_dict.max_steps_env
-        self.query_tensors, self.response_tensors, self.rewards, self.messages = [], [], [], []
+        self.num_steps_train = config_dict.num_steps_train
+        self.query_tensors, self.response_tensors, self.cum_rewards, self.cum_steps, self.dones, self.messages = [], [], [], [], [], []
 
-        # Setup arrays to hold current observation and timestep
+        # Setup arrays to hold current observation
         # for each environment
         self.obss = []
-        self.ts = np.array([0 for _ in range(self.n_parallel)])
 
         # Spin up subprocesses
         self.locals = []
         self.processes = []
+        self.num_env_processes = []
         self.start_processes()
-        init_obs, init_info = self.reset()
-        self.missions = [obs["mission"] for obs in init_obs]
-        system_prompt = utils.get_system_prompt()
-        system_prompts = [system_prompt.replace("{goal}", mission) for mission in self.missions]
-        self.messages = [[{"role": "system", "content": system_prompt}] for system_prompt in system_prompts]
-        for i, sub_message in enumerate(self.messages):
-            sub_message.append({"role": "user", "content": "\n".join(init_info[i]["descriptions"])})
-
-        self.done_mask = np.array([False for _ in range(self.n_parallel)])
+        self.reset()
+        self.memory_size = config_dict.memory_size
 
     def __len__(self):
         return self.n_parallel
@@ -165,13 +164,14 @@ class ParallelTrajectory:
             p.start()
             remote.close()
             self.processes.append(p)
+            self.num_env_processes.append(len(self.envs[i:i + self.envs_per_proc]))
         logger.info("done spinning up processes")
 
     def request_reset_envs(self):
         """Request all processes to reset their envs"""
         logger.info("requesting resets")
-        for local in self.locals:
-            local.send(("reset", None))
+        for i, local in enumerate(self.locals):
+            local.send(("reset", [True for _ in range(self.num_env_processes[i])]))
         self.obss = []
         logger.info("requested resets")
 
@@ -189,15 +189,53 @@ class ParallelTrajectory:
     def reset(self):
         """Reset all environments"""
         infos = self.request_reset_envs()
-        return [obs for obs in self.obss], infos
+        obs = [ob for ob in self.obss]
+        self.missions = [ob["mission"] for ob in obs]
+        system_prompt = utils.get_system_prompt()
+        system_prompts = [system_prompt.replace("{goal}", mission) for mission in self.missions]
+        self.messages = [[{"role": "system", "content": system_prompt}] for system_prompt in system_prompts]
+        self.cum_rewards = [torch.tensor(0).to(self.device) for _ in range(self.n_parallel)]
+        self.cum_steps = [torch.tensor(0).to(self.device) for _ in range(self.n_parallel)]
+        self.mission_messages = self.messages.copy()
+        for i, sub_message in enumerate(self.messages):
+            sub_message.append({"role": "user", "content": "\n".join(infos[i]["descriptions"])})
+    
+    def reset_some(self, ids):
+        """Reset some environment"""
+        if not ids:
+            return
+        process_ids = [i // self.envs_per_proc for i in ids]
+        reset_flags = [i % self.envs_per_proc for i in ids]
+        reset_dict = {i: [False for j in range(self.num_env_processes[i])] for i in process_ids}
+        system_prompt = utils.get_system_prompt()
+        for i, reset_flag in zip(process_ids, reset_flags):
+            reset_dict[i][reset_flag] = True
+        for proc_id, flags in reset_dict.items():
+            self.locals[proc_id].send(("reset", flags))
+            res = self.locals[proc_id].recv()
+            for idx, (obs_item, info_item) in enumerate(res):
+                if flags[idx]:
+                    this_id = proc_id * self.envs_per_proc + idx
+                    self.obss[this_id] = obs_item
+                    self.missions[this_id] = self.obss[this_id]["mission"]
+                    self.messages[this_id] = [{"role": "system", "content": system_prompt.replace("{goal}", self.missions[this_id])}]
+                    self.mission_messages[this_id] = self.messages[this_id].copy()
+                    self.messages[this_id].append({"role": "user", "content": "\n".join(info_item["descriptions"])})
+                    self.cum_rewards[this_id] = torch.tensor(0).to(self.device)
+                    self.cum_steps[this_id] = torch.tensor(0).to(self.device)
+            
+    
+    def clear_memory(self):
+        self.query_tensors = []
+        self.response_tensors = []
+        self.dones = []
 
-    def request_step(self, actions, stop_mask):
+    def request_step(self, actions):
         """Request processes to step corresponding to (primitive) actions
            unless stop mask indicates otherwise"""
         for i in range(0, self.n_parallel, self.envs_per_proc):
             self.locals[i // self.envs_per_proc].send(
-                ("step", [actions[i:i + self.envs_per_proc],
-                          stop_mask[i:i + self.envs_per_proc], self.device])
+                ("step", [actions[i:i + self.envs_per_proc], self.device])
             )
         results = []
         for i in range(0, self.n_parallel, self.envs_per_proc):
@@ -213,8 +251,8 @@ class ParallelTrajectory:
            classifier as needed depending on reward shaping scheme.
            
            Returns:  obs: list of environment observations,
-                     reward: np.array of extrinsic rewards,
-                     done: np.array of booleans,
+                     reward: list of extrinsic rewards,
+                     done: list of booleans,
                      info: depends on self.reward_shaping. Output can be used
                            to shape the reward.
         """
@@ -229,25 +267,24 @@ class ParallelTrajectory:
         actions_to_take = action_texts.copy()
 
         # Make a step in the environment
-        stop_mask = np.array([False for _ in range(self.n_parallel)])
-        obs, reward, done, info = self.request_step(actions_to_take, stop_mask)
-        reward = np.array(reward)
-        done_mask = np.array(done)
+        obs, reward, done, info = self.request_step(actions_to_take)
 
-        self.ts += 1
-        self.ts[done_mask] *= 0
-
-        return [obs for obs in self.obss], reward, done_mask, info
+        return obs, reward, done, info
+    
+    def extract_history(self):
+        # extract last memory_size pair of messages
+        # m[0] is the mission message
+        return [[m[0]] + m[-min(2 * self.memory_size, len(m) - 1):] for m in self.messages]
 
     def generate_actions(self):
-        query_tensors = self.tokenizer.apply_chat_template(self.messages, return_tensors='pt', add_generation_prompt=True, padding='max_length', max_length=512, truncation=True).to(self.device)
+        query_tensors = self.tokenizer.apply_chat_template(self.extract_history(), return_tensors='pt', add_generation_prompt=True, padding='max_length', max_length=512, truncation=True).to(self.device)
         self.query_tensors.append(query_tensors)
 
         response_tensors = self.trainer.generate(list(query_tensors), **self.generation_kwargs, return_prompt=False)
         response_tensors_id_dict_list = []
         for i in range(len(response_tensors)):
             response_tensors_id_dict_list.append({"input_ids": response_tensors[i]})
-        padded_response_tensors = self.tokenizer.pad(response_tensors_id_dict_list, return_tensors='pt', padding='max_length', max_length=self.generation_kwargs['max_new_tokens'])['input_ids']
+        padded_response_tensors = self.tokenizer.pad(response_tensors_id_dict_list, return_tensors='pt', padding='max_length', padding_side='left', max_length=self.generation_kwargs['max_new_tokens'])['input_ids'].to(self.device)
         self.response_tensors.append(padded_response_tensors)
 
         action_texts = self.tokenizer.batch_decode(padded_response_tensors)
@@ -257,21 +294,41 @@ class ParallelTrajectory:
     
     def generate_trajectories(self):
         """Generate trajectories for all environments"""
+        self.clear_memory()
         for i in range(self.max_steps):
-            if all([done for done in self.done_mask]):
-                break
             action_texts = self.generate_actions()
             obs, reward, done, info = self.step(action_texts)
-            self.rewards.append(reward)
+            self.cum_rewards = [r + torch.tensor(re) for r, re in zip(self.cum_rewards, reward)]
+            self.cum_steps = [s + 1 for s in self.cum_steps]
+            self.dones.append(torch.tensor(done))
             for im, m in enumerate(self.messages):
                 if reward[im] == -0.1:
                     m.append({"role": "user", "content": info[im]["descriptions"]})
                 else:
                     m.append({"role": "user", "content": "\n".join(info[im]["descriptions"])})
-            for j, this_done in enumerate(done):
-                if this_done:
-                    self.done_mask[j] = True
-                    final_reward = reward[j]
-                    for k in range(i-1):
-                        self.rewards[k][j] += final_reward
-        return self.query_tensors, self.response_tensors, self.rewards, self.messages
+            self.reset_some([j for j, d in enumerate(done) if d])
+        this_query_tensors = self.query_tensors[-1]
+        this_response_tensors = self.response_tensors[-1]
+        return this_query_tensors, this_response_tensors
+    
+    def collect_batch(self):
+        """Collect a batch of trajectories"""
+        batch_query_tensors, batch_response_tensors, batch_rewards = [], [], []
+        for i in range(self.config.batch_size // self.n_parallel):
+            query_tensors, response_tensors = self.generate_trajectories()
+            batch_query_tensors.extend(torch.unbind(query_tensors, dim=0))
+            batch_response_tensors.extend(torch.unbind(response_tensors, dim=0))
+            average_rewards = [(r / s).item() for r, s in zip(self.cum_rewards, self.cum_steps)]
+            batch_rewards.extend(average_rewards)
+        return batch_query_tensors, batch_response_tensors, batch_rewards
+    
+    def train(self):
+        """Train the model"""
+        logger.info("Starting parallel training loop")
+        for i in tqdm(range(self.num_steps_train)):
+            logger.info("Collecting experiences")
+            query_tensors, response_tensors, rewards = self.collect_batch()
+            stats = self.trainer.step(query_tensors, response_tensors, rewards)
+            self.trainer.log_stats(stats, {"query": query_tensors, "response": response_tensors}, rewards, columns_to_log=["reward_mean", "reward_std", "objective/kl", "ppo/policy_loss", "ppo/value_loss"])
+            logger.info(f"Training step {i} completed")
+        return stats
