@@ -318,7 +318,7 @@ class ParallelTrainer:
             query_tensors, response_tensors = self.generate_trajectories()
             batch_query_tensors.extend(torch.unbind(query_tensors, dim=0))
             batch_response_tensors.extend(torch.unbind(response_tensors, dim=0))
-            average_rewards = [(r / s).item() for r, s in zip(self.cum_rewards, self.cum_steps)]
+            average_rewards = [r / s for r, s in zip(self.cum_rewards, self.cum_steps)]
             batch_rewards.extend(average_rewards)
         return batch_query_tensors, batch_response_tensors, batch_rewards
     
