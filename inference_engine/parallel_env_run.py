@@ -88,10 +88,6 @@ class ParallelTrainer:
         
         self.tokenizer = AutoTokenizer.from_pretrained(config_dict.model_id, padding_side="left")
         self.model = AutoModelForCausalLMWithValueHead.from_pretrained(config_dict.model_id).to(self.device)
-        if self.tokenizer.pad_token_id is None:
-            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
-        if self.model.config.pad_token_id is None:
-            self.model.config.pad_token_id = self.tokenizer.eos_token_id
         logger.info("Loaded model and tokenizer")
         
         self.ref_model = create_reference_model(self.model, num_shared_layers=config_dict.num_shared_layers)
@@ -116,7 +112,7 @@ class ParallelTrainer:
 
         self.max_steps = config_dict.max_steps_env
         self.num_steps_train = config_dict.num_steps_train
-        self.query_tensors, self.response_tensors, self.cum_rewards, self.cum_steps, self.dones, self.messages = [], [], [], [], [], []
+        self.query_tensors, self.response_tensors, self.rewards, self.dones, self.messages = [], [], [], [], []
 
         # Setup arrays to hold current observation
         # for each environment
@@ -194,8 +190,6 @@ class ParallelTrainer:
         system_prompt = utils.get_system_prompt()
         system_prompts = [system_prompt.replace("{goal}", mission) for mission in self.missions]
         self.messages = [[{"role": "system", "content": system_prompt}] for system_prompt in system_prompts]
-        self.cum_rewards = [torch.tensor(0).to(self.device) for _ in range(self.n_parallel)]
-        self.cum_steps = [torch.tensor(0).to(self.device) for _ in range(self.n_parallel)]
         self.mission_messages = self.messages.copy()
         for i, sub_message in enumerate(self.messages):
             sub_message.append({"role": "user", "content": "\n".join(infos[i]["descriptions"])})
@@ -221,13 +215,11 @@ class ParallelTrainer:
                     self.messages[this_id] = [{"role": "system", "content": system_prompt.replace("{goal}", self.missions[this_id])}]
                     self.mission_messages[this_id] = self.messages[this_id].copy()
                     self.messages[this_id].append({"role": "user", "content": "\n".join(info_item["descriptions"])})
-                    self.cum_rewards[this_id] = torch.tensor(0).to(self.device)
-                    self.cum_steps[this_id] = torch.tensor(0).to(self.device)
-            
     
     def clear_memory(self):
         self.query_tensors = []
         self.response_tensors = []
+        self.rewards = []
         self.dones = []
 
     def request_step(self, actions):
@@ -277,7 +269,7 @@ class ParallelTrainer:
         return [[m[0]] + m[-min(2 * self.memory_size, len(m) - 1):] for m in self.messages]
 
     def generate_actions(self):
-        query_tensors = self.tokenizer.apply_chat_template(self.extract_history(), return_tensors='pt', add_generation_prompt=True, padding='max_length', max_length=512, truncation=True).to(self.device)
+        query_tensors = self.tokenizer.apply_chat_template(self.extract_history(), return_tensors='pt', add_generation_prompt=True, padding='max_length', max_length=1024, tokenizer_kwargs={'padding_side' : 'left'}, truncation=True).to(self.device)
         self.query_tensors.append(query_tensors)
 
         response_tensors = self.trainer.generate(list(query_tensors), **self.generation_kwargs, return_prompt=False)
@@ -298,8 +290,7 @@ class ParallelTrainer:
         for i in range(self.max_steps):
             action_texts = self.generate_actions()
             obs, reward, done, info = self.step(action_texts)
-            self.cum_rewards = [r + torch.tensor(re) for r, re in zip(self.cum_rewards, reward)]
-            self.cum_steps = [s + 1 for s in self.cum_steps]
+            self.rewards.append(torch.tensor(reward).to(self.device))
             self.dones.append(torch.tensor(done))
             for im, m in enumerate(self.messages):
                 if reward[im] == -0.1:
@@ -307,19 +298,16 @@ class ParallelTrainer:
                 else:
                     m.append({"role": "user", "content": "\n".join(info[im]["descriptions"])})
             self.reset_some([j for j, d in enumerate(done) if d])
-        this_query_tensors = self.query_tensors[-1]
-        this_response_tensors = self.response_tensors[-1]
-        return this_query_tensors, this_response_tensors
+        return self.query_tensors, self.response_tensors, self.rewards
     
     def collect_batch(self):
         """Collect a batch of trajectories"""
         batch_query_tensors, batch_response_tensors, batch_rewards = [], [], []
-        for i in range(self.config.batch_size // self.n_parallel):
-            query_tensors, response_tensors = self.generate_trajectories()
-            batch_query_tensors.extend(torch.unbind(query_tensors, dim=0))
-            batch_response_tensors.extend(torch.unbind(response_tensors, dim=0))
-            average_rewards = [r / s for r, s in zip(self.cum_rewards, self.cum_steps)]
-            batch_rewards.extend(average_rewards)
+        for i in range(self.config.batch_size // self.n_parallel // self.max_steps):
+            query_tensors, response_tensors, rewards = self.generate_trajectories()
+            batch_query_tensors.extend(list(torch.cat(list(torch.stack(query_tensors, dim=1)), dim=0)))
+            batch_response_tensors.extend(list(torch.cat(list(torch.stack(response_tensors, dim=1)), dim=0)))
+            batch_rewards.extend(list(torch.cat(list(torch.stack(rewards, dim=1)), dim=0)))
         return batch_query_tensors, batch_response_tensors, batch_rewards
     
     def train(self):

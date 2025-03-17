@@ -41,15 +41,15 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "num_shared_layers": 6,
         "max_steps_env": 16,
         "num_steps_train": 5,
-        "epochs": 10,
-        "memory_size": 10,
+        "epochs": 1,
+        "memory_size": 5,
         # Environment config
         "seed": 42,
         "num_envs": 16,
         "action_space": utils.action_list,
         # PPO config
-        "batch_size": 96,
-        "mini_batch_size": 4,
+        "batch_size": 512,
+        "mini_batch_size": 16,
         # Generation kwargs
         "max_new_tokens": 20,
         "do_sample": True,
