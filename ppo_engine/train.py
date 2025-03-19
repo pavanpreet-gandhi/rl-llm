@@ -39,7 +39,7 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
-        "max_steps_env": 16,
+        "max_steps_env": 64,
         "num_steps_train": 5,
         "epochs": 1,
         "memory_size": 5,
@@ -48,7 +48,7 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
         "num_envs": 16,
         "action_space": utils.action_list,
         # PPO config
-        "batch_size": 512,
+        "batch_size": 1024,
         "mini_batch_size": 16,
         # Generation kwargs
         "max_new_tokens": 20,

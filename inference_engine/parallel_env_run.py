@@ -304,6 +304,7 @@ class ParallelTrainer:
         """Collect a batch of trajectories"""
         batch_query_tensors, batch_response_tensors, batch_rewards = [], [], []
         for i in range(self.config.batch_size // self.n_parallel // self.max_steps):
+            self.reset() # Reset all environments every time we collect a batch
             query_tensors, response_tensors, rewards = self.generate_trajectories()
             batch_query_tensors.extend(list(torch.cat(list(torch.stack(query_tensors, dim=1)), dim=0)))
             batch_response_tensors.extend(list(torch.cat(list(torch.stack(response_tensors, dim=1)), dim=0)))
