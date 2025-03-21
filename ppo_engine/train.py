@@ -150,7 +150,7 @@ def train(args, logger: logging.Logger):
 
 def parallel_train(args, logger: logging.Logger):
 
-    parallel_trainer = ParallelTrainer(args)
+    parallel_trainer = ParallelTrainer(args, logger)
     parallel_trainer.train()
 
 

@@ -70,9 +70,10 @@ def get_system_prompt() -> str:
     Returns:
         str: The system prompt
     """
-    with open("resources/system_prompt.txt", "r") as f:
-        system_prompt = f.read()
-    return system_prompt
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Go up from utils/
+    prompt_path = os.path.join(base_dir, "resources/system_prompt.txt")  # Full path to the file
+    with open(prompt_path, "r") as f:
+        return f.read()
 
 
 action_list = [

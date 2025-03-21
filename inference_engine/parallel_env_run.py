@@ -13,9 +13,6 @@ from torch.nn.utils.rnn import pad_sequence
 from tqdm import tqdm
 
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
-
 
 def multi_worker(conn, envs):
     """Target for a subprocess that handles a set of envs"""
@@ -61,11 +58,12 @@ def multi_worker(conn, envs):
             raise NotImplementedError
 
 class ParallelTrainer:
-    def __init__(self, config_dict):
-        
+    def __init__(self, config_dict, logger):
+
+        self.logger = logger
         self.device = torch.device("cuda") if torch.cuda.is_available() \
             else torch.device("cpu")
-        logger.info(f"Using device: {self.device}")
+        self.logger.info(f"Using device: {self.device}")
         
         self.n_parallel = config_dict.num_envs
         self.action_space = [a.replace("_", " ") for a in config_dict.action_space]
@@ -79,7 +77,7 @@ class ParallelTrainer:
         self.spec = deepcopy(self.envs[0].unwrapped.spec)
         self.spec_id = f"ParallelShapedEnv<{self.spec.id}>"
         self.env_name = self.envs[0].unwrapped.spec.id
-        logger.info(f"Created {self.n_parallel} environments with id: {self.env_name} and seed: {config_dict.seed}")
+        self.logger.info(f"Created {self.n_parallel} environments with id: {self.env_name} and seed: {config_dict.seed}")
 
         if "BabyAI" in self.env_name:
             self.envs_per_proc = 4
@@ -88,10 +86,10 @@ class ParallelTrainer:
         
         self.tokenizer = AutoTokenizer.from_pretrained(config_dict.model_id, padding_side="left")
         self.model = AutoModelForCausalLMWithValueHead.from_pretrained(config_dict.model_id).to(self.device)
-        logger.info("Loaded model and tokenizer")
+        self.logger.info("Loaded model and tokenizer")
         
         self.ref_model = create_reference_model(self.model, num_shared_layers=config_dict.num_shared_layers)
-        logger.info(f"Created reference model with {config_dict.num_shared_layers} shared layers")
+        self.logger.info(f"Created reference model with {config_dict.num_shared_layers} shared layers")
         
         self.config = PPOConfig(
             batch_size=config_dict.batch_size, 
@@ -99,7 +97,7 @@ class ParallelTrainer:
             ppo_epochs=config_dict.epochs
         )
         self.trainer = PPOTrainer(self.config, self.model, self.ref_model, self.tokenizer)
-        logger.info("Initialized PPO Trainer")
+        self.logger.info("Initialized PPO Trainer")
         
         self.generation_kwargs = {
             "max_new_tokens": config_dict.max_new_tokens,
@@ -108,7 +106,7 @@ class ParallelTrainer:
             "top_p": config_dict.top_p,
             "temperature": config_dict.temperature,
         }
-        logger.info("Set up generation kwargs")
+        self.logger.info("Set up generation kwargs")
 
         self.max_steps = config_dict.max_steps_env
         self.num_steps_train = config_dict.num_steps_train
@@ -147,7 +145,7 @@ class ParallelTrainer:
 
     def start_processes(self):
         """Spin up the n_parallel/envs_per_proc number of processes"""
-        logger.info(f"spinning up {self.n_parallel} processes")
+        self.logger.info(f"spinning up {self.n_parallel} processes")
         for i in range(0, self.n_parallel, self.envs_per_proc):
             local, remote = Pipe()
             self.locals.append(local)
@@ -161,15 +159,15 @@ class ParallelTrainer:
             remote.close()
             self.processes.append(p)
             self.num_env_processes.append(len(self.envs[i:i + self.envs_per_proc]))
-        logger.info("done spinning up processes")
+        self.logger.info("done spinning up processes")
 
     def request_reset_envs(self):
         """Request all processes to reset their envs"""
-        logger.info("requesting resets")
+        self.logger.info("requesting resets")
         for i, local in enumerate(self.locals):
             local.send(("reset", [True for _ in range(self.num_env_processes[i])]))
         self.obss = []
-        logger.info("requested resets")
+        self.logger.info("requested resets")
 
         infos = []
         for local in self.locals:
@@ -179,7 +177,7 @@ class ParallelTrainer:
                 infos.append(res[j][1])
                 if res[j][0] is not None:
                     self.obss += [res[j][0]]
-        logger.info("completed resets")
+        self.logger.info("completed resets")
         return infos
 
     def reset(self):
@@ -313,11 +311,11 @@ class ParallelTrainer:
     
     def train(self):
         """Train the model"""
-        logger.info("Starting parallel training loop")
+        self.logger.info("Starting parallel training loop")
         for i in tqdm(range(self.num_steps_train)):
-            logger.info("Collecting experiences")
+            self.logger.info("Collecting experiences")
             query_tensors, response_tensors, rewards = self.collect_batch()
             stats = self.trainer.step(query_tensors, response_tensors, rewards)
             self.trainer.log_stats(stats, {"query": query_tensors, "response": response_tensors}, rewards, columns_to_log=["reward_mean", "reward_std", "objective/kl", "ppo/policy_loss", "ppo/value_loss"])
-            logger.info(f"Training step {i} completed")
+            self.logger.info(f"Training step {i} completed")
         return stats
