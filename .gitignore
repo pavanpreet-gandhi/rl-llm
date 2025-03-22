@@ -3,6 +3,9 @@
 custom-instructions.md
 hyperparams.md
 
+# Checkpoints
+checkpoints/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

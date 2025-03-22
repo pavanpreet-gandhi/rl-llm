@@ -4,6 +4,7 @@ from typing import Dict, List, Any, Tuple
 from rich.pretty import pprint
 from types import SimpleNamespace
 from tqdm import tqdm
+import os
 
 import gym
 import babyai_text
@@ -44,7 +45,6 @@ def parse_args() -> Dict[str, Any]:
         "top_k": 50,
         "top_p": 0.95,
         "temperature": 0.8,
-        # "repetition_penalty": 1.0,
 
         # PEFT config
         "use_peft": True,
@@ -52,6 +52,10 @@ def parse_args() -> Dict[str, Any]:
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
+        
+        # Checkpoint config
+        "save_every": 2,  # Save model every X steps
+        "checkpoint_dir": "checkpoints",
     }
     args = SimpleNamespace(**args) # same type as argparse would return
     return args
@@ -66,6 +70,11 @@ def setup_training(args, logger: logging.Logger):
     
     env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0", seed=i)) for i in range(args.num_envs)]
     logger.info(f"Created environment: {args.env_id}")
+
+    # Create checkpoints directory if it doesn't exist
+    checkpoint_dir = os.path.join(args.checkpoint_dir, args.experiment_name)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    logger.info(f"Checkpoint directory created at {checkpoint_dir}")
 
     if args.use_peft:
         peft_config = LoraConfig(
@@ -106,18 +115,14 @@ def setup_training(args, logger: logging.Logger):
     }
     logger.info("Set up generation kwargs")
     
-    return env_managers, trainer, tokenizer, generation_kwargs, device
+    return env_managers, trainer, tokenizer, generation_kwargs, device, checkpoint_dir
 
 
 def train(args, logger: logging.Logger):
     """
     Main training loop.
-        1. Collect experiences
-        2. Train PPO
-        3. Log stats
-        4. Repeat
     """
-    env_managers, trainer, tokenizer, generation_kwargs, device = setup_training(args, logger)
+    env_managers, trainer, tokenizer, generation_kwargs, device, checkpoint_dir = setup_training(args, logger)
     
     logger.info("STARTING TRAINING LOOP")
     for step in tqdm(range(args.num_steps_train)):
@@ -147,7 +152,14 @@ def train(args, logger: logging.Logger):
         trainer.log_stats(stats, batch, rewards)
         wandb.log({"success_rate": success_rate})
         logger.info(f"TRAINING STEP {step} COMPLETED")
-
+        
+        # Save checkpoint if needed
+        if args.save_every > 0 and (step + 1) % args.save_every == 0:
+            checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint-{step + 1}")
+            os.makedirs(checkpoint_path, exist_ok=True)
+            trainer.model.save_pretrained(checkpoint_path) # saves either the full model or just the PEFT adapters
+            logger.info(f"Saved model checkpoint at step {step + 1} to {checkpoint_path}")
+            
 
 if __name__ == "__main__":
     args = parse_args()
