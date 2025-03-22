@@ -14,7 +14,8 @@ from peft import LoraConfig, get_peft_model
 import wandb
 
 import utils
-from sample_trajectory import sample_trajectory
+from env_manager import EnvManager
+from sample_trajectories import sample_trajectories
 
 
 def parse_args() -> Dict[str, Any]:
@@ -30,8 +31,8 @@ def parse_args() -> Dict[str, Any]:
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": 6,
-        "max_steps_env": 5,
         "num_steps_train": 5,
+        "num_envs": 4,
         
         # PPO config
         "batch_size": 4,
@@ -63,7 +64,7 @@ def setup_training(args, logger: logging.Logger):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
-    env = gym.make(args.env_id)
+    env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0", seed=i)) for i in range(args.num_envs)]
     logger.info(f"Created environment: {args.env_id}")
 
     if args.use_peft:
@@ -105,7 +106,7 @@ def setup_training(args, logger: logging.Logger):
     }
     logger.info("Set up generation kwargs")
     
-    return env, trainer, tokenizer, generation_kwargs, device
+    return env_managers, trainer, tokenizer, generation_kwargs, device
 
 
 def train(args, logger: logging.Logger):
@@ -116,33 +117,22 @@ def train(args, logger: logging.Logger):
         3. Log stats
         4. Repeat
     """
-    env, trainer, tokenizer, generation_kwargs, device = setup_training(args, logger)
+    env_managers, trainer, tokenizer, generation_kwargs, device = setup_training(args, logger)
     
     logger.info("Starting training loop")
     for step in tqdm(range(args.num_steps_train)):
         
         # Collect experiences
         logger.info("Collecting experiences")
-        query_tensors, response_tensors, rewards, messages = [], [], [], []
-        
-        while len(rewards) < args.batch_size:
-            
-            query_tensors_ep, response_tensors_ep, rewards_ep, messages_ep = sample_trajectory(
-                env=env, 
-                trainer=trainer, 
-                tokenizer=tokenizer, 
-                generation_kwargs=generation_kwargs, 
-                device=device, 
-                max_steps=args.max_steps_env, 
-            )
-            query_tensors.extend(query_tensors_ep)
-            response_tensors.extend(response_tensors_ep)
-            rewards.extend(rewards_ep)
-            messages.extend(messages_ep)
-            
-            logger.info(f"Collected {len(rewards)} experiences")
-            logger.info(f"Messages: {messages}")
-        
+        query_tensors, response_tensors, rewards = sample_trajectories(
+            env_managers,
+            trainer,
+            tokenizer,
+            generation_kwargs,
+            device,
+            experiences_needed=args.batch_size,
+        )
+        logger.info(f"Collected {len(rewards)} experiences")
         query_tensors = query_tensors[:args.batch_size]
         response_tensors = response_tensors[:args.batch_size]
         rewards = rewards[:args.batch_size]
