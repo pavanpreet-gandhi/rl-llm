@@ -16,14 +16,11 @@ def sample_trajectories(
     experiences_needed: int,
     logger: logging.Logger = None,
     max_steps_per_episode: int = 100,
-    consecutive_invalid_actions_allowed: int = 5,
-    invalid_action_penalty: float = -0.1,
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[float]]:
     """
     Sample trajectories from multiple environments by performing batch inference with a single LLM.
     Continuously collect experiences until the specified number of experiences is reached.
     NOTE: This function can possibly return more than the specified number of experiences.
-    TODO: Implement nice logging to easily spot any bugs or track training.
 
     Args:
         envs (List[EnvManager]): List of environment managers.
@@ -87,27 +84,27 @@ def sample_trajectories(
 
         # Step through environments and collect rewards
         for i, (env, action_text) in enumerate(zip(env_managers, action_texts)):
-            text_obs, reward, done, completed = env.step(action_text)
+            text_obs, reward, done, success = env.step(action_text)
             contexts[i].append({"role": "assistant", "content": action_text})
             contexts[i].append({"role": "user", "content": text_obs})
             rewards_episode[i].append(reward)
-            if len(rewards_episode[i]) > max_steps_per_episode:
+            if len(rewards_episode[i]) >= max_steps_per_episode: # Limit steps per episode
                 done = True
 
             # Reset environment if done
             if done:
                 # If completed successfully, add final reward to all previous rewards
-                if completed:
+                if success:
                     for j in range(len(rewards_episode[i])-1):
                         rewards_episode[i][j] += rewards_episode[i][-1]
                 # Log the queries, responses and rewards for the episode
-                logger.info(f"Episode {i} completed with {len(rewards_episode[i])} steps.")
+                logger.info(f"EPISODE {i} COMPLETED WITH {'SUCCESS' if success else 'FAILURE'} AFTER {len(rewards_episode[i])} STEPS")
                 for j in range(len(rewards_episode[i])):
-                    logger.info(f"Step {j}:")
-                    logger.info(f"Query: {tokenizer.decode(query_tensors_episode[i][j])}")
-                    logger.info(f"Response: {tokenizer.decode(response_tensors_episode[i][j])}")
-                    logger.info(f"Reward: {rewards_episode[i][j]}")
-                    logger.info("-" * 50)
+                    logger.info(f"STEP {j}:"
+                        f"\nQUERY: \n{tokenizer.decode(query_tensors_episode[i][j])}"
+                        f"\nRESPONSE: \n{tokenizer.decode(response_tensors_episode[i][j])}"
+                        f"\nREWARD: {rewards_episode[i][j]}")
+                logger.info(f"EPISODE END\n{'-'*50}")
                 # Append experiences to main lists
                 query_tensors.extend(query_tensors_episode[i])
                 response_tensors.extend(response_tensors_episode[i])

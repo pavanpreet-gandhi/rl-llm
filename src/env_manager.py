@@ -24,9 +24,9 @@ class EnvManager:
             text_obs = "You entered an invalid action, the valid actions are: " + str(list(utils.text_to_action.keys()))
             reward = self.invalid_action_penalty
             done = self.consecutive_invalid_actions >= self.consecutive_invalid_actions_allowed
-            completed = False
+            success = False
         else:
             obs, reward, done, info = self.env.step(action)
             text_obs = "\n".join(info["descriptions"])
-            completed = done
-        return text_obs, reward, done, completed
+            success = done
+        return text_obs, reward, done, success
