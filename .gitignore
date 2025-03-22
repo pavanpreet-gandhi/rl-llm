@@ -3,8 +3,11 @@
 custom-instructions.md
 hyperparams.md
 
-# Checkpoints
+# Created Folders
 checkpoints/
+wandb/
+logs/
+.conda/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
