@@ -1,6 +1,7 @@
 # Custom
 *temp*.ipynb
 custom-instructions.md
+hyperparams.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
