@@ -3,7 +3,7 @@ import gym, babyai_text
 from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
 from typing import Dict, List, Any, Tuple
-from rich.pretty import pprint
+import logging
 import utils
 from env_manager import EnvManager
 
@@ -14,6 +14,7 @@ def sample_trajectories(
     generation_kwargs: Dict[str, Any],
     device: torch.device,
     experiences_needed: int,
+    logger: logging.Logger = None,
     max_steps_per_episode: int = 100,
     consecutive_invalid_actions_allowed: int = 5,
     invalid_action_penalty: float = -0.1,
@@ -37,6 +38,12 @@ def sample_trajectories(
     Returns:
         Tuple[List[torch.Tensor], List[torch.Tensor], List[float]]: Lists of query tensors, response tensors, and rewards.
     """
+    # Configure deafult logger if not provided (logs to stdout)
+    if logger is None:
+        logger = logging.getLogger()
+        logger.setLevel(logging.INFO)
+        logger.info("No logger provided, using default logger outputting to stdout.")
+
     # Initialize lists to store experiences
     num_envs = len(env_managers)
     query_tensors, response_tensors, rewards = [], [], []
@@ -93,6 +100,14 @@ def sample_trajectories(
                 if completed:
                     for j in range(len(rewards_episode[i])-1):
                         rewards_episode[i][j] += rewards_episode[i][-1]
+                # Log the queries, responses and rewards for the episode
+                logger.info(f"Episode {i} completed with {len(rewards_episode[i])} steps.")
+                for j in range(len(rewards_episode[i])):
+                    logger.info(f"Step {j}:")
+                    logger.info(f"Query: {tokenizer.decode(query_tensors_episode[i][j])}")
+                    logger.info(f"Response: {tokenizer.decode(response_tensors_episode[i][j])}")
+                    logger.info(f"Reward: {rewards_episode[i][j]}")
+                    logger.info("-" * 50)
                 # Append experiences to main lists
                 query_tensors.extend(query_tensors_episode[i])
                 response_tensors.extend(response_tensors_episode[i])
@@ -141,11 +156,3 @@ if __name__ == "__main__":
         device,
         experiences_needed=32
     )
-
-    # Print results
-    for i, (query_tensor, response_tensor, reward) in enumerate(zip(query_tensors, response_tensors, rewards)):
-        print(f"Experience {i}:")
-        print(f"Query Tensor: {query_tensor.shape}")
-        print(f"Response Tensor: {response_tensor.shape}")
-        print(f"Reward: {reward}")
-        print()

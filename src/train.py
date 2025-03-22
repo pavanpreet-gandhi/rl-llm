@@ -80,7 +80,7 @@ def setup_training(args, logger: logging.Logger):
         peft_config = None
         logger.info("Not using PEFT")
     
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
+    tokenizer = AutoTokenizer.from_pretrained(args.model_id, padding_side="left")
     model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id, peft_config=peft_config).to(device)
     logger.info("Loaded model and tokenizer")
     
@@ -119,7 +119,7 @@ def train(args, logger: logging.Logger):
     """
     env_managers, trainer, tokenizer, generation_kwargs, device = setup_training(args, logger)
     
-    logger.info("Starting training loop")
+    logger.info("STARTING TRAINING LOOP")
     for step in tqdm(range(args.num_steps_train)):
         
         # Collect experiences
@@ -131,6 +131,7 @@ def train(args, logger: logging.Logger):
             generation_kwargs,
             device,
             experiences_needed=args.batch_size,
+            logger=logger,
         )
         logger.info(f"Collected {len(rewards)} experiences")
         query_tensors = query_tensors[:args.batch_size]
