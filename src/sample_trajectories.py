@@ -130,7 +130,7 @@ if __name__ == "__main__":
         "top_p": 0.95,
         "temperature": 0.8,
     }
-    env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0")) for _ in range(4)]
+    env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0", seed=i)) for i in range(4)]
 
     # Sample trajectories
     query_tensors, response_tensors, rewards = sample_trajectories(
