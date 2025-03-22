@@ -124,7 +124,7 @@ def train(args, logger: logging.Logger):
         
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
-        query_tensors, response_tensors, rewards = sample_trajectories(
+        query_tensors, response_tensors, rewards, success_rate = sample_trajectories(
             env_managers,
             trainer,
             tokenizer,
@@ -145,6 +145,7 @@ def train(args, logger: logging.Logger):
         response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
         batch = {'query': query, 'response': response}
         trainer.log_stats(stats, batch, rewards)
+        wandb.log({"success_rate": success_rate})
         logger.info(f"TRAINING STEP {step} COMPLETED")
 
 

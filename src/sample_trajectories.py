@@ -33,7 +33,11 @@ def sample_trajectories(
         invalid_action_penalty (float): Penalty for invalid actions.
     
     Returns:
-        Tuple[List[torch.Tensor], List[torch.Tensor], List[float]]: Lists of query tensors, response tensors, and rewards.
+        Tuple[List[torch.Tensor], List[torch.Tensor], List[float], float]:
+            - List of query tensors.
+            - List of response tensors.
+            - List of rewards.
+            - Success rate of the episodes.
     """
     # Configure deafult logger if not provided (logs to stdout)
     if logger is None:
@@ -127,12 +131,13 @@ def sample_trajectories(
     
     # Log the proportion of successful episodes
     logger.info(f"COLLECTED {len(rewards)} EXPERIENCES")
-    logger.info(f"SUCCESS RATE: {success_count / total_episodes * 100:.2f}%")
+    success_rate = success_count / total_episodes if total_episodes > 0 else 0
+    logger.info(f"SUCCESS RATE: {success_rate * 100:.2f}%")
     logger.info(f"TOTAL EPISODES: {total_episodes}")
     
     # Convert rewards to tensors and return
     rewards = [torch.tensor(reward).to(device) for reward in rewards]
-    return query_tensors, response_tensors, rewards
+    return query_tensors, response_tensors, rewards, success_rate
 
 
 if __name__ == "__main__":
@@ -156,7 +161,7 @@ if __name__ == "__main__":
     env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0", seed=i)) for i in range(4)]
 
     # Sample trajectories
-    query_tensors, response_tensors, rewards = sample_trajectories(
+    query_tensors, response_tensors, rewards, success_rate = sample_trajectories(
         env_managers,
         trainer,
         tokenizer,
