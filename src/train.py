@@ -123,7 +123,7 @@ def train(args, logger: logging.Logger):
     for step in tqdm(range(args.num_steps_train)):
         
         # Collect experiences
-        logger.info("Collecting experiences")
+        logger.info("COLLECTING EXPERIENCES...")
         query_tensors, response_tensors, rewards = sample_trajectories(
             env_managers,
             trainer,
@@ -133,7 +133,6 @@ def train(args, logger: logging.Logger):
             experiences_needed=args.batch_size,
             logger=logger,
         )
-        logger.info(f"Collected {len(rewards)} experiences")
         query_tensors = query_tensors[:args.batch_size]
         response_tensors = response_tensors[:args.batch_size]
         rewards = rewards[:args.batch_size]
@@ -146,7 +145,7 @@ def train(args, logger: logging.Logger):
         response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
         batch = {'query': query, 'response': response}
         trainer.log_stats(stats, batch, rewards)
-        logger.info(f"Training step {step} completed")
+        logger.info(f"TRAINING STEP {step} COMPLETED")
 
 
 if __name__ == "__main__":

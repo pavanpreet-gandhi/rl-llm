@@ -56,6 +56,10 @@ def sample_trajectories(
         system_prompt = system_prompt_template.replace("{goal}", mission)
         messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": text_obs})
+    
+    # Keep track of the proportion of successful episodes
+    success_count = 0
+    total_episodes = 0
 
     # Main loop to collect experiences
     while len(rewards) < experiences_needed:
@@ -93,10 +97,12 @@ def sample_trajectories(
 
             # Reset environment if done
             if done:
+                total_episodes += 1
                 # If completed successfully, add final reward to all previous rewards
                 if success:
                     for j in range(len(rewards_episode[i])-1):
                         rewards_episode[i][j] += rewards_episode[i][-1]
+                    success_count += 1
                 # Log the queries, responses and rewards for the episode
                 logger.info(f"EPISODE {i} COMPLETED WITH {'SUCCESS' if success else 'FAILURE'} AFTER {len(rewards_episode[i])} STEPS")
                 for j in range(len(rewards_episode[i])):
@@ -104,7 +110,7 @@ def sample_trajectories(
                         f"\nQUERY: \n{tokenizer.decode(query_tensors_episode[i][j])}"
                         f"\nRESPONSE: \n{tokenizer.decode(response_tensors_episode[i][j])}"
                         f"\nREWARD: {rewards_episode[i][j]}")
-                logger.info(f"EPISODE END\n{'-'*50}")
+                logger.info(f"EPISODE END")
                 # Append experiences to main lists
                 query_tensors.extend(query_tensors_episode[i])
                 response_tensors.extend(response_tensors_episode[i])
@@ -118,6 +124,11 @@ def sample_trajectories(
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [{"role": "system", "content": system_prompt}]
                 contexts[i].append({"role": "user", "content": text_obs})
+    
+    # Log the proportion of successful episodes
+    logger.info(f"COLLECTED {len(rewards)} EXPERIENCES")
+    logger.info(f"SUCCESS RATE: {success_count / total_episodes * 100:.2f}%")
+    logger.info(f"TOTAL EPISODES: {total_episodes}")
     
     # Convert rewards to tensors and return
     rewards = [torch.tensor(reward).to(device) for reward in rewards]
