@@ -71,9 +71,11 @@ def setup_training(args, logger: logging.Logger):
     """
     Set up everything required for training.
     """
+    # Set up device for training
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
+    # Set up environment managers
     env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0", seed=i)) for i in range(args.num_envs)]
     logger.info(f"Created environment: {args.env_id}")
 
@@ -82,6 +84,7 @@ def setup_training(args, logger: logging.Logger):
     os.makedirs(checkpoint_dir, exist_ok=True)
     logger.info(f"Checkpoint directory created at {checkpoint_dir}")
 
+    # Create PEFT config if using PEFT
     if args.use_peft:
         peft_config = LoraConfig(
             r=args.lora_r,
@@ -95,13 +98,16 @@ def setup_training(args, logger: logging.Logger):
         peft_config = None
         logger.info("Not using PEFT")
     
+    # Create model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, padding_side="left")
     model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id, peft_config=peft_config).to(device)
     logger.info("Loaded model and tokenizer")
     
+    # Create reference model
     ref_model = create_reference_model(model, num_shared_layers=args.num_shared_layers)
     logger.info(f"Created reference model with {args.num_shared_layers} shared layers")
     
+    # Set up PPOTrainer object
     config = PPOConfig(
         batch_size=args.batch_size, 
         mini_batch_size=args.mini_batch_size,
@@ -112,6 +118,7 @@ def setup_training(args, logger: logging.Logger):
     trainer = PPOTrainer(config, model, ref_model, tokenizer)
     logger.info("Initialized PPO Trainer")
     
+    # Set up generation kwargs for sampling trajectories
     generation_kwargs = {
         "max_new_tokens": args.max_new_tokens,
         "do_sample": args.do_sample,
@@ -141,6 +148,7 @@ def train(args, logger: logging.Logger):
     """
     Main training loop.
     """
+    # Set up training
     env_managers, trainer, tokenizer, generation_kwargs, device, checkpoint_dir = setup_training(args, logger)
     
     logger.info("STARTING TRAINING LOOP")
@@ -192,8 +200,16 @@ def train(args, logger: logging.Logger):
 
 
 if __name__ == "__main__":
+    # Parse arguments
     args = parse_args()
+
+    # set up logger and wandb
     wandb.init(project=args.project_name, name=args.experiment_name)
     logger = utils.create_logger(args.experiment_name, console_output=True)
     logger.info(f"Using arguments: {args}")
-    train(args, logger)
+
+    # Call the training function
+    try:
+        train(args, logger)
+    except Exception as e:
+        logger.error(f"Training failed: {e}")
