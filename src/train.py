@@ -32,20 +32,20 @@ def parse_args() -> Dict[str, Any]:
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
 
         # Checkpoint config
-        "save_every": 100, # TODO
+        "save_every": 50,
         "checkpoint_dir": "checkpoints",
 
         # Training config
-        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",
         "num_shared_layers": None,
-        "num_steps_train": 5, # TODO
-        "num_envs": 4, # TODO
+        "num_steps_train": 2000,
+        "num_envs": 8,
         
         # PPO config
-        "batch_size": 4, # TODO
-        "mini_batch_size": 4, # TODO
-        "gradient_accumulation_steps": 1, # TODO
+        "batch_size": 128,
+        "mini_batch_size": 128,
+        "gradient_accumulation_steps": 1,
         "optimize_device_cache": True,
         "early_stopping": False,
 
