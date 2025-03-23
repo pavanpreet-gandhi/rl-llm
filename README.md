@@ -36,4 +36,11 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     pip install -e .
     cd ../..
     ```
-
+7. Login to wandb (create an account first if you don't have one)
+    ```bash
+    wandb login
+    ```
+8. Login to huggingface (create an account first if you don't have one)
+    ```bash
+    huggingface-cli login
+    ```
