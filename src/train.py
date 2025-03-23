@@ -31,7 +31,7 @@ def parse_args() -> Dict[str, Any]:
         "project_name": "babyai-ppo",
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "push_to_hub": True,
-        "hub_model_id": None, # If None, will use f"{wandb.run.entity}/{args.project_name}-{args.experiment_name}"
+        "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         "hub_push_every": 2, # How often to push to hub (in steps)
 
         # Training config
