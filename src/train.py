@@ -23,8 +23,6 @@ from sample_trajectories import sample_trajectories
 def parse_args() -> Dict[str, Any]:
     """
     Parse command training configuration arguments.
-    TODO: Other hyperparameters (e.g. learning_rate, ppo_epochs, kl stuff, cliprange, vf_coeff, whiten_rewards, etc.)
-    TODO: Choose generation kwargs
     """
     args = {
         # Logging config
@@ -32,36 +30,41 @@ def parse_args() -> Dict[str, Any]:
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "push_to_hub": True,
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
-        "hub_push_every": 2, # How often to push to hub (in steps)
+
+        # Checkpoint config
+        "save_every": 100, # TODO
+        "checkpoint_dir": "checkpoints",
 
         # Training config
         "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
-        "env_id": "BabyAI-GoToLocal-v0",
-        "num_shared_layers": 6,
-        "num_steps_train": 5,
-        "num_envs": 4,
+        "env_id": "BabyAI-MixedTrainLocal-v0",
+        "num_shared_layers": None,
+        "num_steps_train": 5, # TODO
+        "num_envs": 4, # TODO
         
         # PPO config
-        "batch_size": 4,
-        "mini_batch_size": 4,
+        "batch_size": 4, # TODO
+        "mini_batch_size": 4, # TODO
+        "gradient_accumulation_steps": 1, # TODO
+        "optimize_device_cache": True,
+        "early_stopping": False,
+
+        # Env config
+        "consecutive_invalid_actions_allowed": 5,
+        "invalid_action_penalty": -0.1,
+        "max_steps_per_episode": 100,
         
         # Generation kwargs
         "max_new_tokens": 20,
         "do_sample": True,
-        "top_k": 50,
-        "top_p": 0.95,
         "temperature": 0.8,
 
         # PEFT config
         "use_peft": True,
-        "lora_r": 16,
+        "lora_r": 32,
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
-        
-        # Checkpoint config
-        "save_every": 2,  # Save model every X steps
-        "checkpoint_dir": "checkpoints",
     }
     args = SimpleNamespace(**args) # same type as argparse would return
     return args
@@ -76,7 +79,14 @@ def setup_training(args, logger: logging.Logger):
     logger.info(f"Using device: {device}")
     
     # Set up environment managers
-    env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0", seed=i)) for i in range(args.num_envs)]
+    env_managers = [
+        EnvManager(
+            gym.make("BabyAI-MixedTrainLocal-v0", seed=i), 
+            invalid_action_penalty=args.invalid_action_penalty,
+            consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
+        )
+        for i in range(args.num_envs)
+    ]
     logger.info(f"Created environment: {args.env_id}")
 
     # Create checkpoints directory if it doesn't exist
@@ -111,6 +121,9 @@ def setup_training(args, logger: logging.Logger):
     config = PPOConfig(
         batch_size=args.batch_size, 
         mini_batch_size=args.mini_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        optimize_device_cache=args.optimize_device_cache,
+        early_stopping=args.early_stopping,
         is_peft_model=args.use_peft,
         exp_name=args.experiment_name,
         log_with="wandb",
@@ -164,10 +177,13 @@ def train(args, logger: logging.Logger):
             device,
             experiences_needed=args.batch_size,
             logger=logger,
+            max_steps_per_episode=args.max_steps_per_episode,
         )
-        query_tensors = query_tensors[:args.batch_size]
-        response_tensors = response_tensors[:args.batch_size]
-        rewards = rewards[:args.batch_size]
+        # Randomly select args.batch_size samples from the collected experiences (since we may have more than args.batch_size experiences)
+        indices = torch.randperm(len(rewards))[:args.batch_size]
+        query_tensors = query_tensors[indices]
+        response_tensors = response_tensors[indices]
+        rewards = rewards[indices]
         
         # Train step
         stats = trainer.step(query_tensors, response_tensors, rewards)
@@ -187,16 +203,16 @@ def train(args, logger: logging.Logger):
             trainer.model.save_pretrained(checkpoint_path) # saves either the full model or just the PEFT adapters
             logger.info(f"Saved model checkpoint at step {step + 1} to {checkpoint_path}")
         
-        # Push to HuggingFace Hub if needed
-        if args.push_to_hub and args.hub_push_every > 0 and (step + 1) % args.hub_push_every == 0:
-            try:
-                trainer.model.push_to_hub(
-                    args.hub_model_id, 
-                    commit_message=f"Training checkpoint {step + 1}",
-                )
-            except Exception as e:
-                logger.error(f"Failed to push to hub: {e}")
-                logger.info("Continuing with training")
+            # Push to HuggingFace Hub if needed
+            if args.push_to_hub:
+                try:
+                    trainer.model.push_to_hub(
+                        args.hub_model_id, 
+                        commit_message=f"Training checkpoint {step + 1}",
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to push to hub: {e}")
+                    logger.info("Continuing with training")
 
 
 if __name__ == "__main__":
