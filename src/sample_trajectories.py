@@ -146,8 +146,9 @@ if __name__ == "__main__":
     # Setup
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = PPOConfig(batch_size=4, mini_batch_size=4)
-    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct"
+    model_id = "meta-llama/Llama-3.2-3B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
+    tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLMWithValueHead.from_pretrained(model_id)
     ref_model = create_reference_model(model)
     trainer = PPOTrainer(config, model, ref_model, tokenizer)
@@ -158,7 +159,7 @@ if __name__ == "__main__":
         "top_p": 0.95,
         "temperature": 0.8,
     }
-    env_managers = [EnvManager(gym.make("BabyAI-MixedTrainLocal-v0", seed=i)) for i in range(4)]
+    env_managers = [EnvManager(gym.make("BabyAI-GoToObj-v0", seed=i)) for i in range(1)]
 
     # Sample trajectories
     query_tensors, response_tensors, rewards, success_rate = sample_trajectories(

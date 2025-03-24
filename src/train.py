@@ -36,11 +36,11 @@ def parse_args() -> Dict[str, Any]:
         "checkpoint_dir": "checkpoints",
 
         # Training config
-        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",
         "num_shared_layers": None,
         "num_steps_train": 3, # TODO: change to 10_000
-        "num_envs": 4, # TODO: change to 8
+        "num_envs": 1, # TODO: change to 8
         
         # PPO config
         "batch_size": 4, # TODO: change to 128
@@ -54,11 +54,11 @@ def parse_args() -> Dict[str, Any]:
         "max_steps_per_episode": 100,
         
         # Generation kwargs
-        "max_new_tokens": 20,
+        "max_new_tokens": 10,
         "do_sample": True,
         "temperature": 0.8,
-        "top_k": 50,
-        "top_p": 0.95,
+        "top_k": 40,
+        "top_p": 0.9,
 
         # PEFT config
         "use_peft": True,
@@ -111,6 +111,7 @@ def setup_training(args, logger: logging.Logger):
     
     # Create model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, padding_side="left")
+    tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id, peft_config=peft_config).to(device)
     logger.info("Loaded model and tokenizer")
     
