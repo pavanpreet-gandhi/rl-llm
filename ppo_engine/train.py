@@ -36,8 +36,8 @@ def parse_args(logger: logging.Logger) -> Dict[str, Any]:
     """
     args = {
         # Others
-        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
-        "env_id": "BabyAI-GoToLocal-v0",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+        "env_id": "BabyAI-MixedTrainLocal-v0",
         "num_shared_layers": 6,
         "max_steps_env": 64,
         "num_steps_train": 5,
