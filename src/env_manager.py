@@ -21,7 +21,9 @@ class EnvManager:
         action = utils.text_to_action.get(text_action, None)
         if action is None:
             self.consecutive_invalid_actions += 1
-            text_obs = "You entered an invalid action, the valid actions are: " + str(list(utils.text_to_action.keys()))
+            invalid_action_message = "Invalid action, the valid actions are: " + ", ".join(utils.text_to_action.keys()) + ".\n"
+            invalid_action_message += "Please output one of the above actions and nothing else."
+            text_obs = invalid_action_message
             reward = self.invalid_action_penalty
             done = self.consecutive_invalid_actions >= self.consecutive_invalid_actions_allowed
             success = False
