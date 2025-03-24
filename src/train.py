@@ -36,16 +36,15 @@ def parse_args() -> Dict[str, Any]:
         "checkpoint_dir": "checkpoints",
 
         # Training config
-        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",
         "num_shared_layers": None,
-        "num_steps_train": 2000,
-        "num_envs": 8,
+        "num_steps_train": 3, # TODO: change to 10_000
+        "num_envs": 4, # TODO: change to 8
         
         # PPO config
-        "batch_size": 128,
-        "mini_batch_size": 128,
-        "gradient_accumulation_steps": 1,
+        "batch_size": 4, # TODO: change to 128
+        "mini_batch_size": 4, # TODO: change according to memory constarints
         "optimize_device_cache": True,
         "early_stopping": False,
 
@@ -58,6 +57,8 @@ def parse_args() -> Dict[str, Any]:
         "max_new_tokens": 20,
         "do_sample": True,
         "temperature": 0.8,
+        "top_k": 50,
+        "top_p": 0.95,
 
         # PEFT config
         "use_peft": True,
@@ -121,7 +122,6 @@ def setup_training(args, logger: logging.Logger):
     config = PPOConfig(
         batch_size=args.batch_size, 
         mini_batch_size=args.mini_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
         optimize_device_cache=args.optimize_device_cache,
         early_stopping=args.early_stopping,
         is_peft_model=args.use_peft,
@@ -179,11 +179,11 @@ def train(args, logger: logging.Logger):
             logger=logger,
             max_steps_per_episode=args.max_steps_per_episode,
         )
-        # Randomly select args.batch_size samples from the collected experiences (since we may have more than args.batch_size experiences)
-        indices = torch.randperm(len(rewards))[:args.batch_size]
-        query_tensors = query_tensors[indices]
-        response_tensors = response_tensors[indices]
-        rewards = rewards[indices]
+        # Select random subset of experiences (since sample_trajectories could return more than needed)
+        indices = torch.randperm(len(rewards))[:args.batch_size].tolist()
+        query_tensors = [query_tensors[i] for i in indices]
+        response_tensors = [response_tensors[i] for i in indices]
+        rewards = [rewards[i] for i in indices]
         
         # Train step
         stats = trainer.step(query_tensors, response_tensors, rewards)
@@ -228,4 +228,5 @@ if __name__ == "__main__":
     try:
         train(args, logger)
     except Exception as e:
-        logger.error(f"Training failed: {e}")
+        import traceback
+        logger.error(f"Training failed: {e}\n{traceback.format_exc()}")
