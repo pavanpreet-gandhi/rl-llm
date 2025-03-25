@@ -22,6 +22,8 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
 4. Install the requirements
     ```bash
     pip install -r requirements.txt
+    pip install numpy==1.23.1 tf-keras # fix dependancy issues
+    pip install --upgrade "jinja2>=3.1.0"
     ```
 5. Install BabyAI-Text
     ```bash
