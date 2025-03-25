@@ -17,7 +17,7 @@ from huggingface_hub import HfApi, create_repo
 
 import utils
 from env_manager import EnvManager
-from sample_trajectories import sample_trajectories
+from sample_batch import sample_batch
 
 
 def parse_args() -> Dict[str, Any]:
@@ -170,15 +170,13 @@ def train(args, logger: logging.Logger):
         
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
-        query_tensors, response_tensors, rewards, success_rate = sample_trajectories(
+        query_tensors, response_tensors, rewards, success_rate = sample_batch(
             env_managers,
             trainer,
             tokenizer,
             generation_kwargs,
-            device,
-            experiences_needed=args.batch_size,
+            batch_size=args.batch_size,
             logger=logger,
-            max_steps_per_episode=args.max_steps_per_episode,
         )
         # Select random subset of experiences (since sample_trajectories could return more than needed)
         indices = torch.randperm(len(rewards))[:args.batch_size].tolist()

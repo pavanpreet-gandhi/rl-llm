@@ -26,9 +26,7 @@ class EnvManager:
             text_obs = invalid_action_message
             reward = self.invalid_action_penalty
             done = self.consecutive_invalid_actions >= self.consecutive_invalid_actions_allowed
-            success = False
         else:
             obs, reward, done, info = self.env.step(action)
             text_obs = "\n".join(info["descriptions"])
-            success = done
-        return text_obs, reward, done, success
+        return text_obs, reward, done
