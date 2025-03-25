@@ -36,15 +36,15 @@ def parse_args() -> Dict[str, Any]:
         "checkpoint_dir": "checkpoints",
 
         # Training config
-        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+        "model_id": "meta-llama/Llama-3.2-1B-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",
         "num_shared_layers": None,
         "num_steps_train": 5000,
         "num_envs": 1, # TODO: change to 8
         
         # PPO config
-        "batch_size": 128, # TODO: change to 128
-        "mini_batch_size": 32, # TODO: change according to memory constraints
+        "batch_size": 4, # TODO: change to 128
+        "mini_batch_size": 4, # TODO: change according to memory constraints
         "optimize_device_cache": True,
         "early_stopping": False,
 
@@ -62,7 +62,7 @@ def parse_args() -> Dict[str, Any]:
 
         # PEFT config
         "use_peft": True,
-        "lora_r": 32,
+        "lora_r": 16,
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
