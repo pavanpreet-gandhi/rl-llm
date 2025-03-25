@@ -10,24 +10,20 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     cd rl-llm
     git checkout <branch_name>
     ```
-2. Create `.conda` environment
+2. Create and activate `.venv` environment
     ```bash
-    conda create --prefix ./.conda python=3.9 -y
-    conda activate ./.conda
+    python3 -m venv --system-site-packages .venv
+    source .venv/bin/activate
     ```
-3. Make sure `pip` is pointing to the correct conda environment (optional)
-    ```bash
-    which pip
-    ```
-4. Install this repo in editable mode
+3. Install this repo in editable mode
     ```bash
     pip install -e .
     ```
-5. Install the requirements
+4. Install the requirements
     ```bash
     pip install -r requirements.txt
     ```
-6. Install BabyAI-Text
+5. Install BabyAI-Text
     ```bash
     git clone https://github.com/flowersteam/Grounding_LLMs_with_online_RL.git
     cd Grounding_LLMs_with_online_RL
@@ -35,6 +31,12 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     cd gym-minigrid; pip install -e.; cd ..
     pip install -e .
     cd ../..
+    ```
+6. Configure git
+    ```bash
+    git config --global credential.helper store
+    git config --global user.name "Your Name"
+    git config --global user.email "your.email@example.com"
     ```
 7. Login to wandb (create an account first if you don't have one)
     ```bash
