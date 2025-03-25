@@ -20,7 +20,7 @@ from trl import (
 args = {
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",
-        "env_id": "BabyAI-MixedTrainLocal-v0",
+        "env_id": "BabyAI-GoToObj-v0",
         "num_shared_layers": None,
         "num_steps_train": 2000,
         "num_envs": 4,
@@ -91,7 +91,7 @@ In a moment I will present you an observation.
 Tips:
 - Once the desired object you want to interact or pickup in front of you, you can use the 'toggle' action to interact with it.
 - It doesn't make sense to repeat the same action over and over if the observation doesn't change.
-- Output maximum 2 words per action.
+- Never use brackets in your response!!!
 
 PLAY!
 """
@@ -137,15 +137,22 @@ while True:
     response_texts = tokenizer.batch_decode(generated_tokens_trial, skip_special_tokens=True)
 
     for i, (env, action_text) in enumerate(zip(envs, response_texts)):
+        # print('taking action: ', action_text, "in environment number: ", i, type(action_text))
         action = text_to_action.get(action_text.lower(), None)
+
         if action is None:
+            # print('Not valid')
             text_obs = "You entered an invalid action, say nothing other than: " + str(list(text_to_action.keys()))
             reward = -0.1
             done = False
             success = False
         else:
             obs, reward, done, info = env.step(action)
+            if reward > 0:
+                # print(obs)
+                print('reward', reward)
             text_obs = '\n'.join(info["descriptions"])
             success = True
         contexts[i].append({"role": "assistant", "content": action_text.lower()})
         contexts[i].append({"role": "user", "content": text_obs})
+    
