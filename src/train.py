@@ -39,12 +39,12 @@ def parse_args() -> Dict[str, Any]:
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",
         "num_shared_layers": None,
-        "num_steps_train": 3, # TODO: change to 10_000
+        "num_steps_train": 5000,
         "num_envs": 1, # TODO: change to 8
         
         # PPO config
-        "batch_size": 4, # TODO: change to 128
-        "mini_batch_size": 4, # TODO: change according to memory constarints
+        "batch_size": 128, # TODO: change to 128
+        "mini_batch_size": 32, # TODO: change according to memory constraints
         "optimize_device_cache": True,
         "early_stopping": False,
 
@@ -170,10 +170,10 @@ def train(args, logger: logging.Logger):
         
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
-        query_tensors, response_tensors, rewards, success_rate = sample_batch(
+        query_tensors, response_tensors, rewards, sampling_stats = sample_batch(
             env_managers,
-            trainer,
             tokenizer,
+            trainer,
             generation_kwargs,
             batch_size=args.batch_size,
             logger=logger,
@@ -183,6 +183,12 @@ def train(args, logger: logging.Logger):
         query_tensors = [query_tensors[i] for i in indices]
         response_tensors = [response_tensors[i] for i in indices]
         rewards = [rewards[i] for i in indices]
+        # Log sampling stats to wandb
+        wandb.log({
+            "success_rate": sampling_stats["success_rate"],
+            "total_count": sampling_stats["total_count"],
+            "success_count": sampling_stats["success_count"]
+        })
         
         # Train step
         stats = trainer.step(query_tensors, response_tensors, rewards)
@@ -192,7 +198,6 @@ def train(args, logger: logging.Logger):
         response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
         batch = {'query': query, 'response': response}
         trainer.log_stats(stats, batch, rewards)
-        wandb.log({"success_rate": success_rate})
         logger.info(f"TRAINING STEP {step} COMPLETED")
         
         # Save checkpoint if needed

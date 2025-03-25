@@ -82,7 +82,7 @@ def sample_batch(
                     rewards_per_episode[i][j] += rewards_per_episode[i][-1]
                 # Append trajectory to Q, R, W
                 Q.extend(query_tensors_per_episode[i])
-                R.extend(rewards_per_episode[i])
+                R.extend(response_tensors_per_episode[i])
                 W.extend(rewards_per_episode[i])
                 # Reset env and contexts
                 query_tensors_per_episode[i] = []
@@ -97,6 +97,10 @@ def sample_batch(
                     logger.info(f"SYSTEM: {contexts[i][0]['content']}")
                     logger.info(f"USER: {contexts[i][1]['content']}")
     
+    # Convert rewards to tensors
+    W = [torch.tensor(w, dtype=torch.float32) for w in W]
+    
+    # Compute stats
     success_rate = success_count / total_count if total_count > 0 else 0
     stats = {
         "success_rate": success_rate,
@@ -126,9 +130,9 @@ if __name__=="__main__":
     }
     env_id = "BabyAI-GoToObj-v0" # "BabyAI-MixedTrainLocal-v0"
 
-    num_envs = 8
+    num_envs = 1
     env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
-    batch_size = 128
+    batch_size = 8
 
     start_time = time.time()
     Q, R, W, stats = sample_batch(env_managers, tokenizer, trainer, generation_kwargs, batch_size)
