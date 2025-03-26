@@ -44,15 +44,15 @@ def parse_args() -> Dict[str, Any]:
         "num_envs": 1, # TODO: change to 8
         
         # PPO config
-        "batch_size": 64, # TODO: change to 128
+        "batch_size": 32, # TODO: change to 128
         "mini_batch_size": 8, # TODO: change according to memory constraints
         "optimize_device_cache": True,
         "early_stopping": False,
-        "learning_rate": 1.41e-5 * math.sqrt(0.5),
+        "learning_rate": 1.41e-5 * math.sqrt(0.25),
 
         # Env config
         "consecutive_invalid_actions_allowed": 5,
-        "invalid_action_penalty": -0.1,
+        "invalid_action_penalty": -2,
         "context_window": 5, # Number of previous experiences to keep in context
         
         # Generation kwargs
