@@ -15,6 +15,7 @@ def sample_batch(
         generation_kwargs: Dict[str, Any],
         batch_size: int,
         logger: logging.Logger = None,
+        context_window: int = 5, # Number of previous experiences to keep in context
     ) -> Tuple[List[torch.Tensor], List[float], List[torch.Tensor]]:
     """"
     Sample a batch of experiences from the environment.
@@ -48,6 +49,8 @@ def sample_batch(
 
         query_tensors_step = []
         for context in contexts:
+            if len(context) > (2 * context_window + 1):
+                context = context[0:1] + context[-(2*context_window):]
             query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
             query_tensors_step.append(query_tensor)
         
@@ -129,13 +132,14 @@ if __name__=="__main__":
         "temperature": 0.8,
     }
     env_id = "BabyAI-GoToObj-v0" # "BabyAI-MixedTrainLocal-v0"
+    context_window = 5
 
     num_envs = 1
     env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
     batch_size = 8
 
     start_time = time.time()
-    Q, R, W, stats = sample_batch(env_managers, tokenizer, trainer, generation_kwargs, batch_size)
+    Q, R, W, stats = sample_batch(env_managers, tokenizer, trainer, generation_kwargs, batch_size, context_window=context_window)
     elapsed_time = time.time() - start_time
     print(f"Success rate: {stats['success_rate']:.2f}")
     print(f"Success count: {stats['success_count']}")
