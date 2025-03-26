@@ -111,7 +111,8 @@ def setup_training(args, logger: logging.Logger):
     
     # Create model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, padding_side="left")
-    tokenizer.pad_token = tokenizer.eos_token
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id, peft_config=peft_config).to(device)
     logger.info("Loaded model and tokenizer")
     
@@ -170,6 +171,7 @@ def train(args, logger: logging.Logger):
         
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
+        start_time = datetime.now()
         query_tensors, response_tensors, rewards, sampling_stats = sample_batch(
             env_managers,
             tokenizer,
@@ -178,6 +180,9 @@ def train(args, logger: logging.Logger):
             batch_size=args.batch_size,
             logger=logger,
         )
+        sample_time = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Sample batch time: {sample_time:.2f} seconds")
+        
         # Select random subset of experiences (since sample_trajectories could return more than needed)
         indices = torch.randperm(len(rewards))[:args.batch_size].tolist()
         query_tensors = [query_tensors[i] for i in indices]
@@ -187,17 +192,23 @@ def train(args, logger: logging.Logger):
         wandb.log({
             "success_rate": sampling_stats["success_rate"],
             "total_count": sampling_stats["total_count"],
-            "success_count": sampling_stats["success_count"]
+            "success_count": sampling_stats["success_count"],
+            "sample_batch_time": sample_time
         })
         
         # Train step
+        start_time = datetime.now()
         stats = trainer.step(query_tensors, response_tensors, rewards)
+        train_time = (datetime.now() - start_time).total_seconds()
+        logger.info(f"Trainer step time: {train_time:.2f} seconds")
 
         # Log stats
         query = tokenizer.batch_decode(query_tensors, skip_special_tokens=True)
         response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
         batch = {'query': query, 'response': response}
         trainer.log_stats(stats, batch, rewards)
+        # Add timing stats to wandb
+        wandb.log({"trainer_step_time": train_time})
         logger.info(f"TRAINING STEP {step} COMPLETED")
         
         # Save checkpoint if needed
