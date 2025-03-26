@@ -5,6 +5,7 @@ from rich.pretty import pprint
 from types import SimpleNamespace
 from tqdm import tqdm
 import os, sys
+import math
 
 import gym
 import babyai_text
@@ -47,6 +48,7 @@ def parse_args() -> Dict[str, Any]:
         "mini_batch_size": 8, # TODO: change according to memory constraints
         "optimize_device_cache": True,
         "early_stopping": False,
+        "learning_rate": 1.41e-5 * math.sqrt(0.5),
 
         # Env config
         "consecutive_invalid_actions_allowed": 5,
