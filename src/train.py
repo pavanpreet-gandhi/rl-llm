@@ -38,7 +38,7 @@ def parse_args() -> Dict[str, Any]:
 
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",
-        "env_id": "BabyAI-MixedTrainLocal-v0",
+        "env_id": "BabyAI-GoToObj-v0",
         "num_shared_layers": None,
         "num_steps_train": 1000,
         "num_envs": 1, # TODO: change to 8
@@ -84,7 +84,7 @@ def setup_training(args, logger: logging.Logger):
     # Set up environment managers
     env_managers = [
         EnvManager(
-            gym.make("BabyAI-MixedTrainLocal-v0", seed=i), 
+            gym.make(args.env_id, seed=i), 
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
         )
