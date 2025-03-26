@@ -36,33 +36,33 @@ def parse_args() -> Dict[str, Any]:
         "checkpoint_dir": "checkpoints",
 
         # Training config
-        "model_id": "meta-llama/Llama-3.2-1B-Instruct",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",
         "num_shared_layers": None,
-        "num_steps_train": 5000,
+        "num_steps_train": 1000,
         "num_envs": 1, # TODO: change to 8
         
         # PPO config
-        "batch_size": 4, # TODO: change to 128
-        "mini_batch_size": 4, # TODO: change according to memory constraints
+        "batch_size": 64, # TODO: change to 128
+        "mini_batch_size": 8, # TODO: change according to memory constraints
         "optimize_device_cache": True,
         "early_stopping": False,
 
         # Env config
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -0.1,
-        "max_steps_per_episode": 100,
+        "context_window": 5, # Number of previous experiences to keep in context
         
         # Generation kwargs
+        "min_length": -1, # don't ignore the EOS token
+        "top_k": 0.0, # no top-k sampling
+        "top_p": 1.0, # no nucleus sampling
+        "do_sample": True, # yes, we want to sample
         "max_new_tokens": 10,
-        "do_sample": True,
-        "temperature": 0.8,
-        "top_k": 40,
-        "top_p": 0.9,
 
         # PEFT config
         "use_peft": True,
-        "lora_r": 16,
+        "lora_r": 32,
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
@@ -140,6 +140,7 @@ def setup_training(args, logger: logging.Logger):
         "top_k": args.top_k,
         "top_p": args.top_p,
         "temperature": args.temperature,
+        "pad_token_id": tokenizer.eos_token_id,
     }
     logger.info("Set up generation kwargs")
 
@@ -179,6 +180,7 @@ def train(args, logger: logging.Logger):
             generation_kwargs,
             batch_size=args.batch_size,
             logger=logger,
+            context_window=args.context_window,
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
