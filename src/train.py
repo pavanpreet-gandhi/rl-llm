@@ -40,12 +40,12 @@ def parse_args() -> Dict[str, Any]:
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-GoToObj-v0",
         "num_shared_layers": None,
-        "num_steps_train": 1000,
+        "num_steps_train": 20, #1000,
         "num_envs": 1, # TODO: change to 8
         
         # PPO config
-        "batch_size": 32, # TODO: change to 128
-        "mini_batch_size": 8, # TODO: change according to memory constraints
+        "batch_size": 45, # TODO: change to 128
+        "mini_batch_size": 45, # TODO: change according to memory constraints
         "optimize_device_cache": True,
         "early_stopping": False,
         "learning_rate": 1.41e-5 * math.sqrt(0.25),
@@ -53,7 +53,7 @@ def parse_args() -> Dict[str, Any]:
         # Env config
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
-        "context_window": 5, # Number of previous experiences to keep in context
+        "context_window": 1, # Number of previous experiences to keep in context
         
         # Generation kwargs
         "min_length": -1, # don't ignore the EOS token
@@ -61,6 +61,7 @@ def parse_args() -> Dict[str, Any]:
         "top_p": 1.0, # no nucleus sampling
         "do_sample": True, # yes, we want to sample
         "max_new_tokens": 10,
+        "temperature": 1.0,
 
         # PEFT config
         "use_peft": True,
