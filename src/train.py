@@ -41,11 +41,11 @@ def parse_args() -> Dict[str, Any]:
         "env_id": "BabyAI-GoToObj-v0",
         "num_shared_layers": None,
         "num_steps_train": 1000,
-        "num_envs": 1, # TODO: change to 8
+        "num_envs": 4, # TODO: change to 8
         
         # PPO config
         "batch_size": 128, # TODO: change to 128
-        "mini_batch_size": 16, # TODO: change according to memory constraints
+        "mini_batch_size": 64, # TODO: change according to memory constraints
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
@@ -202,6 +202,7 @@ def train(args, logger: logging.Logger):
             "success_rate": sampling_stats["success_rate"],
             "total_count": sampling_stats["total_count"],
             "success_count": sampling_stats["success_count"],
+            "avg_success_reward": sampling_stats["avg_success_reward"],
             "sample_batch_time": sample_time
         })
         

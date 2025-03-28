@@ -27,7 +27,7 @@ def sample_batch(
 
     # Initialize variables
     num_envs = len(env_managers)
-    success_count, total_count = 0, 0
+    success_count, total_count, success_rewards = 0, 0, 0
     Q, R, W = [], [], [] # Query, Response, and Reward tensors
     query_tensors_per_episode = [[] for _ in range(num_envs)]
     response_tensors_per_episode = [[] for _ in range(num_envs)]
@@ -81,6 +81,7 @@ def sample_batch(
                 success = True if reward > 0 else False
                 total_count += 1
                 success_count += 1 if success else 0
+                success_rewards += reward if success else 0
                 for j in range(len(rewards_per_episode[i])-1):
                     rewards_per_episode[i][j] += rewards_per_episode[i][-1]
                 # Append trajectory to Q, R, W
@@ -105,10 +106,12 @@ def sample_batch(
     
     # Compute stats
     success_rate = success_count / total_count if total_count > 0 else 0
+    avg_success_reward = success_rewards / success_count if success_count > 0 else 0
     stats = {
         "success_rate": success_rate,
         "total_count": total_count,
         "success_count": success_count,
+        "avg_success_reward": avg_success_reward,
     }
     return Q, R, W, stats
 
