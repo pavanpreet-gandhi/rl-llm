@@ -53,7 +53,7 @@ def parse_args() -> Dict[str, Any]:
         # Env config
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
-        "context_window": 5, # Number of previous experiences to keep in context
+        "context_window": 1, # Number of previous experiences to keep in context
         
         # Generation kwargs
         "min_length": -1, # don't ignore the EOS token
