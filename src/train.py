@@ -44,11 +44,11 @@ def parse_args() -> Dict[str, Any]:
         "num_envs": 1, # TODO: change to 8
         
         # PPO config
-        "batch_size": 32, # TODO: change to 128
-        "mini_batch_size": 8, # TODO: change according to memory constraints
-        "optimize_device_cache": True,
+        "batch_size": 128, # TODO: change to 128
+        "mini_batch_size": 16, # TODO: change according to memory constraints
+        "optimize_device_cache": False,
         "early_stopping": False,
-        "learning_rate": 1.41e-5 * math.sqrt(0.25),
+        "learning_rate": 1.41e-5,
 
         # Env config
         "consecutive_invalid_actions_allowed": 5,
@@ -61,6 +61,7 @@ def parse_args() -> Dict[str, Any]:
         "top_p": 1.0, # no nucleus sampling
         "do_sample": True, # yes, we want to sample
         "max_new_tokens": 10,
+        "temperature": 0.8,
 
         # PEFT config
         "use_peft": True,
@@ -115,7 +116,11 @@ def setup_training(args, logger: logging.Logger):
     tokenizer = AutoTokenizer.from_pretrained(args.model_id, padding_side="left")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLMWithValueHead.from_pretrained(args.model_id, peft_config=peft_config).to(device)
+    model = AutoModelForCausalLMWithValueHead.from_pretrained(
+        args.model_id, 
+        peft_config=peft_config, 
+        torch_dtype=torch.bfloat16
+    ).to(device)
     logger.info("Loaded model and tokenizer")
     
     # Create reference model
