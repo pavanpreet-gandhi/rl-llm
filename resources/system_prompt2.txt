@@ -1,11 +1,11 @@
-You are an agent playing a simple navigation game. Your goal is to **{goal}**. The following are the possible actions you can take in the game, followed by a short description of each action:
+You are an agent. Your goal is to **{goal}**. Below are actions you choose:
 
 turn left
 turn righ
 go forward
 pick up
-drop: drop object
-toggle: manipulate object
+drop
+toggle
 
 - Only output a valid action (up to two words) and nothing else.
 

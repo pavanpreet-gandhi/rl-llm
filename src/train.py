@@ -39,7 +39,7 @@ def parse_args() -> Dict[str, Any]:
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-GoToObj-v0",
-        "num_shared_layers": None,
+        "num_shared_layers": 8, #None
         "num_steps_train": 20, #1000,
         "num_envs": 1, # TODO: change to 8
         
@@ -49,6 +49,7 @@ def parse_args() -> Dict[str, Any]:
         "optimize_device_cache": True,
         "early_stopping": False,
         "learning_rate": 1.41e-5 * math.sqrt(0.25),
+        "mixed_precision": "fp16", # Enable mixed precision training (fp16 or bf16)
 
         # Env config
         "consecutive_invalid_actions_allowed": 5,
@@ -132,10 +133,21 @@ def setup_training(args, logger: logging.Logger):
         is_peft_model=args.use_peft,
         exp_name=args.experiment_name,
         log_with="wandb",
+        learning_rate=args.learning_rate,
+        # mixed_precision=args.mixed_precision,  # Enable mixed precision training
     )
     trainer = PPOTrainer(config, model, ref_model, tokenizer)
-    logger.info("Initialized PPO Trainer")
-    
+    logger.info(f"Initialized PPO Trainer")
+
+    # # Manually enable mixed precision if specified
+    # if args.mixed_precision == "fp16":
+    #     model.half()  # Convert model to half precision
+    #     logger.info("Manually enabled FP16 precision")
+
+    # # Set up caching to avoid double computation during forward pass
+    # trainer.generate_and_cache_fn = trainer.generate
+    # logger.info("Set up computation caching to avoid double forward pass")
+
     # Set up generation kwargs for sampling trajectories
     generation_kwargs = {
         "max_new_tokens": args.max_new_tokens,

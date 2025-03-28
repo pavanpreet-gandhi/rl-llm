@@ -58,6 +58,7 @@ def sample_batch(
             query_tensors_step,
             generation_kwargs=generation_kwargs,
             return_prompt=False,
+            # cache_outputs=True
         )
         response_texts_step = tokenizer.batch_decode(response_tensors_step, skip_special_tokens=True)
         
