@@ -38,14 +38,14 @@ def parse_args() -> Dict[str, Any]:
 
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", 
-        "env_id": "BabyAI-GoToObj-v0",
+        "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": None,
         "num_steps_train": 1000,
         "num_envs": 4, # TODO: 4
         
         # PPO config
         "batch_size": 128, # TODO: 128
-        "mini_batch_size": 64, # TODO: 64
+        "mini_batch_size": 32, # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
@@ -199,13 +199,13 @@ def train(args, logger: logging.Logger):
         response_tensors = [response_tensors[i] for i in indices]
         rewards = [rewards[i] for i in indices]
         # Log sampling stats to wandb
-        wandb.log({
+        metrics = {
             "success_rate": sampling_stats["success_rate"],
             "total_count": sampling_stats["total_count"],
             "success_count": sampling_stats["success_count"],
             "avg_success_reward": sampling_stats["avg_success_reward"],
             "sample_batch_time": sample_time
-        }, step=step)
+        }
         
         # Train step
         start_time = datetime.now()
@@ -213,14 +213,18 @@ def train(args, logger: logging.Logger):
         train_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Trainer step time: {train_time:.2f} seconds")
 
-        # Log stats
+        # Add timing stats to wandb
+        metrics.update({
+            "trainer_step_time": train_time,
+            "total_time": sample_time + train_time,
+        })
+        wandb.log(metrics, step=step)
+        logger.info(f"TRAINING STEP {step} COMPLETED")
+        # Log trainer stats
         query = tokenizer.batch_decode(query_tensors, skip_special_tokens=True)
         response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
         batch = {'query': query, 'response': response}
         trainer.log_stats(stats, batch, rewards)
-        # Add timing stats to wandb
-        wandb.log({"trainer_step_time": train_time, "total_time": sample_time + train_time}, step=step)
-        logger.info(f"TRAINING STEP {step} COMPLETED")
         
         # Save checkpoint if needed
         if args.save_every > 0 and (step + 1) % args.save_every == 0:
