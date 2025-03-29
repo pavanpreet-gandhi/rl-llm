@@ -60,20 +60,15 @@ class Level_GoToPickupOnly(LevelGen):
                 while str(obj.type) == 'door':
                     obj = self._rand_elem(objs)
                 self.instrs = PickupInstr(ObjDesc(obj.type, obj.color))
-                
-                mission_accepted = True
-                # Uncomment and modify if you need to exclude certain combinations
-                # mission_accepted = not (self.exclude_substrings())
+                mission_accepted = not (self.exclude_substrings())
 
-    # Optional: Implement if you need to exclude specific object-color combinations
-    # def exclude_substrings(self):
-    #     # True if contains excluded substring
-    #     list_exclude_combinaison = ["yellow box", "red key", "red door", "green ball", "grey door"]
-
-    #     for sub_str in list_exclude_combinaison:
-    #         if sub_str in self.instrs.surface(self):
-    #             return True
-    #     return False
+    def exclude_substrings(self):
+        # True if contains excluded substring
+        list_exclude_combinaison = ["yellow box", "red key", "red door", "green ball", "grey door"]
+        for sub_str in list_exclude_combinaison:
+            if sub_str in self.instrs.surface(self):
+                return True
+        return False
 
     def _regen_grid(self):
         # Create the grid
