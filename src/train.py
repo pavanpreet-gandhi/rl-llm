@@ -38,7 +38,7 @@ def parse_args() -> Dict[str, Any]:
 
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",
-        "env_id": "BabyAI-GoToObj-v0",
+        "env_id": "BabyAI-GoToPickupOnly-v0",
         "num_shared_layers": None,
         "num_steps_train": 1000,
         "num_envs": 4, # TODO: change to 8

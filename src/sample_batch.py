@@ -120,7 +120,7 @@ if __name__=="__main__":
     import time
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = PPOConfig(batch_size=4, mini_batch_size=4)
-    model_id = "meta-llama/Llama-3.2-3B-Instruct"
+    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct" # "meta-llama/Llama-3.2-3B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -134,7 +134,7 @@ if __name__=="__main__":
         "top_p": 0.95,
         "temperature": 0.8,
     }
-    env_id = "BabyAI-GoToObj-v0" # "BabyAI-MixedTrainLocal-v0"
+    env_id = "BabyAI-GoToPickupOnly-v0" # "BabyAI-MixedTrainLocal-v0"
     context_window = 5
 
     num_envs = 1
