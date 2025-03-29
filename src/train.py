@@ -27,25 +27,25 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-ppo-dev", # TODO: "babyai-ppo-experiments"
+        "project_name": "babyai-ppo-experiments", # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-        "push_to_hub": False, # TODO: True
+        "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
 
         # Checkpoint config
-        "save_every": 1, # TODO: 50
+        "save_every": 25, # TODO: 25
         "checkpoint_dir": "checkpoints",
 
         # Training config
-        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct", # "meta-llama/Llama-3.2-3B-Instruct",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", 
         "env_id": "BabyAI-GoToPickupOnly-v0",
         "num_shared_layers": None,
         "num_steps_train": 1000,
-        "num_envs": 1, # TODO: 4
+        "num_envs": 4, # TODO: 4
         
         # PPO config
-        "batch_size": 16, # TODO: 128
-        "mini_batch_size": 4, # TODO: 64
+        "batch_size": 128, # TODO: 128
+        "mini_batch_size": 64, # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,

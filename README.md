@@ -27,7 +27,6 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     ```
 5. Install BabyAI-Text
     ```bash
-    git clone https://github.com/flowersteam/Grounding_LLMs_with_online_RL.git
     cd Grounding_LLMs_with_online_RL
     pip install blosc; cd babyai-text/babyai; pip install -e .; cd ..
     cd gym-minigrid; pip install -e.; cd ..
@@ -37,8 +36,8 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
 6. Configure git
     ```bash
     git config --global credential.helper store
-    git config --global user.name "Your Name"
-    git config --global user.email "your.email@example.com"
+    git config --global user.name "Pavan"
+    git config --global user.email "pavanpreet.gandhi@gmail.com"
     ```
 7. Login to wandb (create an account first if you don't have one)
     ```bash
