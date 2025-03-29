@@ -6,6 +6,43 @@ from transformers import PreTrainedTokenizer, AutoTokenizer
 from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
 from typing import Dict, List, Any, Tuple
 import logging
+import numpy as np
+
+
+def td_lambda_targets(rewards, next_values, gamma=0.99, lam=0.95):
+    """
+    Compute TD(λ) returns (targets) for one episode/trajectory of length T=N-1.
+
+    Args:
+        rewards     : 1D array of length T, where rewards[t] = r_{t+1} 
+                      is the reward obtained when transitioning 
+                      s_t -> s_{t+1}.
+        next_values : 1D array of length T, where next_values[t] = V(s_{t+1}).
+                      For a terminal s_{T}, you typically set next_values[T-1] = 0.
+        gamma       : discount factor (0 <= gamma <= 1).
+        lam         : the λ in TD(λ) (0 <= lam <= 1).
+
+    Returns:
+        targets     : 1D NumPy array of length T, where targets[t] 
+                      is the TD(λ) return G_{λ}(t).
+                      
+    Notes:
+    - If lam=0, this becomes 1-step TD:   G_t = r_{t+1} + gamma * V(s_{t+1}).
+    - If lam=1, it accumulates future rewards all the way (plus final bootstrap),
+      similar to a Monte Carlo return if the final is terminal and set to 0.
+    - We iterate backwards so we can build each TD(λ) target with a single pass.
+    """
+    T = len(rewards)   # also len(next_values)
+    targets = np.zeros(T, dtype=np.float32)
+
+    G = 0.0  # Running 'backward' value for the λ-return
+    for t in reversed(range(T)):
+        # Recurrence for the λ-return:
+        #   G = r_{t+1} + gamma * [ (1-lam)*V(s_{t+1}) + lam * G ]
+        G = rewards[t] + gamma * ((1.0 - lam)*next_values[t] + lam*G)
+        targets[t] = G
+
+    return targets
 
 
 def sample_batch(
@@ -15,7 +52,9 @@ def sample_batch(
         generation_kwargs: Dict[str, Any],
         batch_size: int,
         logger: logging.Logger = None,
-        context_window: int = 5, # Number of previous experiences to keep in context
+        context_window: int = 5, # Number of previous experiences to keep in 
+        gamma: float = 1,
+        lam: float = 0.95,
     ) -> Tuple[List[torch.Tensor], List[float], List[torch.Tensor]]:
     """"
     Sample a batch of experiences from the environment.
@@ -32,6 +71,7 @@ def sample_batch(
     query_tensors_per_episode = [[] for _ in range(num_envs)]
     response_tensors_per_episode = [[] for _ in range(num_envs)]
     rewards_per_episode = [[] for _ in range(num_envs)]
+    next_state_values_per_episode = [[] for _ in range(num_envs)]
 
     # Reset envs and initialize contexts
     contexts = [[] for _ in range(num_envs)]
@@ -46,48 +86,65 @@ def sample_batch(
             logger.info(f"USER: {context[1]['content']}")
 
     while len(W) < batch_size:
-
+        
+        # Obtain query tensors for each environment
         query_tensors_step = []
         for context in contexts:
-            if len(context) > (2 * context_window + 1):
-                context = context[0:1] + context[-(2*context_window):]
             query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
             query_tensors_step.append(query_tensor)
         
+        # Generate responses for each environment
         response_tensors_step = trainer.generate(
             query_tensors_step,
             generation_kwargs=generation_kwargs,
             return_prompt=False,
         )
+        # Decode response tensors to text
         response_texts_step = tokenizer.batch_decode(response_tensors_step, skip_special_tokens=True)
         
+        # Process each environment's response
         for i, (env, response_text) in enumerate(zip(env_managers, response_texts_step)):
-
+            
+            # Save query and response tensors
             query_tensors_per_episode[i].append(query_tensors_step[i])
             response_tensors_per_episode[i].append(response_tensors_step[i])
 
+            # Take step in the environment and save reward
             text_obs, reward, done = env.step(response_text)
             rewards_per_episode[i].append(reward)
+
+            # Update context with the new obs from the environment
             contexts[i].append({"role": "assistant", "content": response_text})
             contexts[i].append({"role": "user", "content": text_obs})
+            # Clip context if necessary
+            if len(context) > (2 * context_window + 1):
+                context = context[0:1] + context[-(2*context_window):]
+
+            # Compute value of next state
+            new_query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt").to(trainer.current_device)
+            with torch.no_grad():
+                logits, _, values = trainer.model(new_query_tensor)
+                value = values[0, -1].item()
+            next_state_values_per_episode[i].append(value)
 
             if i==0 and logger is not None:
                 logger.info(f"ASSISTANT: {response_text}")
                 logger.info(f"USER: {text_obs}")
-                logger.info(f"REWARD: {reward} DONE: {done}")
+                logger.info(f"REWARD: {reward} | DONE: {done} | VALUE: {value}")
 
             if done:
-                # Discount future rewards if successful
+                # Track success
                 success = True if reward > 0 else False
                 total_count += 1
                 success_count += 1 if success else 0
                 success_rewards += reward if success else 0
-                for j in range(len(rewards_per_episode[i])-1):
-                    rewards_per_episode[i][j] += rewards_per_episode[i][-1]
+                # Compute TD(λ) targets
+                next_state_values_per_episode[i][-1] = 0.0 # Set value of terminal state to 0
+                targets = td_lambda_targets(rewards_per_episode[i], next_state_values_per_episode[i], gamma=gamma, lam=lam)
                 # Append trajectory to Q, R, W
                 Q.extend(query_tensors_per_episode[i])
                 R.extend(response_tensors_per_episode[i])
-                W.extend(rewards_per_episode[i])
+                W.extend(targets)
                 # Reset env and contexts
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
@@ -135,7 +192,7 @@ if __name__=="__main__":
         "temperature": 0.8,
     }
     env_id = "BabyAI-GoToObj-v0" # "BabyAI-MixedTrainLocal-v0"
-    context_window = 5
+    context_window = 1
 
     num_envs = 1
     env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
