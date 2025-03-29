@@ -27,25 +27,25 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-ppo",
+        "project_name": "babyai-ppo-dev", # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-        "push_to_hub": True,
+        "push_to_hub": False, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
 
         # Checkpoint config
-        "save_every": 50,
+        "save_every": 1, # TODO: 50
         "checkpoint_dir": "checkpoints",
 
         # Training config
-        "model_id": "meta-llama/Llama-3.2-3B-Instruct",
+        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct", # "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-GoToPickupOnly-v0",
         "num_shared_layers": None,
         "num_steps_train": 1000,
-        "num_envs": 4, # TODO: change to 8
+        "num_envs": 1, # TODO: 4
         
         # PPO config
-        "batch_size": 128, # TODO: change to 128
-        "mini_batch_size": 64, # TODO: change according to memory constraints
+        "batch_size": 16, # TODO: 128
+        "mini_batch_size": 4, # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
@@ -226,14 +226,19 @@ def train(args, logger: logging.Logger):
             checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint-{step + 1}")
             os.makedirs(checkpoint_path, exist_ok=True)
             trainer.model.save_pretrained(checkpoint_path) # saves either the full model or just the PEFT adapters
+            tokenizer.save_pretrained(checkpoint_path)
             logger.info(f"Saved model checkpoint at step {step + 1} to {checkpoint_path}")
         
             # Push to HuggingFace Hub if needed
             if args.push_to_hub:
                 try:
-                    trainer.model.push_to_hub(
-                        args.hub_model_id, 
-                        commit_message=f"Training checkpoint {step + 1}",
+                    api = HfApi()
+                    api.upload_folder(
+                        folder_path=checkpoint_path,
+                        path_in_repo=".",
+                        repo_id=args.hub_model_id,
+                        commit_message=f"Checkpoint {step + 1}",
+                        repo_type="model",
                     )
                 except Exception as e:
                     logger.error(f"Failed to push to hub: {e}")
