@@ -180,7 +180,7 @@ def train(args, logger: logging.Logger):
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
         start_time = datetime.now()
-        query_tensors, response_tensors, rewards, sampling_stats = sample_batch(
+        query_tensors, response_tensors, rewards, metrics = sample_batch(
             env_managers,
             tokenizer,
             trainer,
@@ -193,19 +193,13 @@ def train(args, logger: logging.Logger):
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
         
         # Select random subset of experiences (since sample_trajectories could return more than needed)
-        wandb.log({"sampled_batch_size": len(rewards)}, step=step)
         indices = torch.randperm(len(rewards))[:args.batch_size].tolist()
         query_tensors = [query_tensors[i] for i in indices]
         response_tensors = [response_tensors[i] for i in indices]
         rewards = [rewards[i] for i in indices]
         # Log sampling stats to wandb
-        metrics = {
-            "success_rate": sampling_stats["success_rate"],
-            "total_count": sampling_stats["total_count"],
-            "success_count": sampling_stats["success_count"],
-            "avg_success_reward": sampling_stats["avg_success_reward"],
-            "sample_batch_time": sample_time
-        }
+        metrics["sampled_batch_size"] = len(rewards)
+        metrics["sample_time"] = sample_time
         
         # Train step
         start_time = datetime.now()
