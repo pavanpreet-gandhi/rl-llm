@@ -68,6 +68,7 @@ def parse_args() -> Dict[str, Any]:
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
+        "reasoning_flag": True,
     }
     args = SimpleNamespace(**args)  # same type as argparse would return
     return args
@@ -87,7 +88,7 @@ def setup_training(args, logger: logging.Logger):
             gym.make(args.env_id, seed=i),
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
-            reasoning_flag=True,  # TODO: True
+            reasoning_flag=args.reasoning_flag,  # TODO: True
         )
         for i in range(args.num_envs)
     ]
@@ -190,6 +191,7 @@ def train(args, logger: logging.Logger):
             batch_size=args.batch_size,
             logger=logger,
             context_window=args.context_window,
+            reasoning_flag=args.reasoning_flag,
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
