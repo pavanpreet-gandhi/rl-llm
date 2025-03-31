@@ -19,14 +19,15 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         for traj_rewards, traj_values, traj_dones in zip(rewards, values, dones):
             advantages = []
             last_advantage = 0
-            next_value = 0  # Bootstrap if not terminal
+            next_value = 0 if traj_dones[-1] else traj_values[-1] # Bootstrap if not terminal
             
             for t in reversed(range(len(traj_rewards))):
                 delta = traj_rewards[t] + self.gamma * next_value * (1 - traj_dones[t]) - traj_values[t]
                 advantage = delta + self.gamma * self.gae_lambda * (1 - traj_dones[t]) * last_advantage
-                advantages.insert(0, advantage)
+                advantages.append(advantage)
                 last_advantage = advantage
                 next_value = traj_values[t]
+            advantages.reverse()  # Reverse to get the correct order
             batch_advantages.append(advantages)
         return batch_advantages
 
@@ -42,25 +43,36 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         batch_values = []
         
         for i in range(len(batch_queries)):
-            this_traj_querys = batch_queries[i]
+            this_traj_queries = batch_queries[i]
             this_traj_responses = batch_responses[i]
             
             self.model.eval()
             with torch.no_grad():
-                model_inputs = self.prepare_model_inputs(this_traj_querys, this_traj_responses)
-                values = self.model(**model_inputs).value[:, -1].tolist()
+                model_inputs = self.prepare_model_inputs(this_traj_queries, this_traj_responses)
+                values = self.model(**model_inputs).value[:, 0].cpu().tolist()
                 batch_values.append(values)
             self.model.train()
         
         # Compute GAE advantages
         batch_advantages = self.compute_gae_batch(batch_rewards, batch_values, batch_dones)
+        
+        all_advantages = torch.cat([torch.tensor(adv) for adv in batch_advantages])
+    
+        # Normalize globally
+        norm_advantages = (all_advantages - all_advantages.mean()) / (all_advantages.std() + 1e-8)
+        
+        # Reshape back if needed (e.g., for logging)
+        norm_advantages = norm_advantages.split([len(traj) for traj in batch_advantages])
+        
+        # Flatten for PPO.step()
+        flat_advantages = torch.cat(norm_advantages).flatten().tolist()
+        
         # Flatten the batch
         flat_batch_queries = [query for traj in batch_queries for query in traj]
         flat_batch_responses = [response for traj in batch_responses for response in traj]
-        flat_batch_advantages = [torch.Tensor(adv) for traj in batch_advantages for adv in traj]
         
         self.step(
             flat_batch_queries,
             flat_batch_responses,
-            flat_batch_advantages,  # Using GAE as reward
+            flat_advantages,  # Using GAE as reward
         )
