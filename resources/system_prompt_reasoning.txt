@@ -6,5 +6,8 @@ You are an intelligent agent. Your goal is to **{goal}**. You have the following
 - drop
 - toggle
 
-Before outputting your final answer, think step-by-step about which action best advances your goal. Then, output only the chosen valid action (up to two words) and nothing else.
+Before outputting your final answer, think step-by-step about which action best advances your goal. 
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words) and nothing else 
+
 PLAY!
