@@ -185,7 +185,7 @@ def train(args, logger: logging.Logger):
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
         start_time = datetime.now()
-        query_tensors, response_tensors, rewards, metrics = sample_batch(
+        query_tensors, response_tensors, rewards, dones, metrics = sample_batch(
             env_managers,
             tokenizer,
             trainer,
@@ -198,17 +198,17 @@ def train(args, logger: logging.Logger):
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
         
         # Select random subset of experiences (since sample_trajectories could return more than needed)
-        indices = torch.randperm(len(rewards))[:args.batch_size].tolist()
-        query_tensors = [query_tensors[i] for i in indices]
-        response_tensors = [response_tensors[i] for i in indices]
-        rewards = [rewards[i] for i in indices]
+        # indices = torch.randperm(len(rewards))[:args.batch_size].tolist()
+        # query_tensors = [query_tensors[i] for i in indices]
+        # response_tensors = [response_tensors[i] for i in indices]
+        # rewards = [rewards[i] for i in indices]
         # Log sampling stats to wandb
         metrics["sampled_batch_size"] = len(rewards)
         metrics["sample_time"] = sample_time
         
         # Train step
         start_time = datetime.now()
-        stats = trainer.step(query_tensors, response_tensors, rewards)
+        stats = trainer.train_on_batch(query_tensors, response_tensors, rewards, dones)
         train_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Trainer step time: {train_time:.2f} seconds")
 
@@ -220,8 +220,8 @@ def train(args, logger: logging.Logger):
         wandb.log(metrics, step=step)
         logger.info(f"TRAINING STEP {step} COMPLETED")
         # Log trainer stats
-        query = tokenizer.batch_decode(query_tensors, skip_special_tokens=True)
-        response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
+        query = tokenizer.batch_decode(query_tensors.flatten(), skip_special_tokens=True)
+        response = tokenizer.batch_decode(response_tensors.flatten(), skip_special_tokens=True)
         batch = {'query': query, 'response': response}
         trainer.log_stats(stats, batch, rewards)
         

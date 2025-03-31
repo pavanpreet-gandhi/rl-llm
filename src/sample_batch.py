@@ -135,9 +135,10 @@ def sample_batch(
                 success_rewards += reward if success else 0
                 episode_length = len(rewards_per_episode[i])
                 # Append trajectory to Q, R, W
-                Q.extend(query_tensors_per_episode[i])
-                R.extend(response_tensors_per_episode[i])
-                W.extend(rewards_per_episode[i])
+                Q.append(query_tensors_per_episode[i])
+                R.append(response_tensors_per_episode[i])
+                W.append(rewards_per_episode[i])
+                D.append(dones_per_episode[i])
                 # Reset env and contexts
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
@@ -151,9 +152,6 @@ def sample_batch(
                     logger.info(f"SYSTEM: {contexts[i][0]['content']}")
                     logger.info(f"USER: {contexts[i][1]['content']}")
     
-    # Convert rewards to tensors
-    W = [torch.tensor(w, dtype=torch.float32) for w in W]
-    
     # Compute stats
     success_rate = successful_episode_count / total_episode_count if total_episode_count > 0 else 0
     avg_success_reward = success_rewards / successful_episode_count if successful_episode_count > 0 else 0
@@ -165,7 +163,7 @@ def sample_batch(
         "avg_success_reward": avg_success_reward,
         "avg_generate_time": avg_generate_time,
     }
-    return Q, R, W, stats
+    return Q, R, W, D, stats
 
 
 if __name__=="__main__":
@@ -194,7 +192,7 @@ if __name__=="__main__":
     batch_size = 8
 
     start_time = time.time()
-    Q, R, W, stats = sample_batch(env_managers, tokenizer, trainer, generation_kwargs, batch_size, context_window=context_window)
+    Q, R, W, D, stats = sample_batch(env_managers, tokenizer, trainer, generation_kwargs, batch_size, context_window=context_window)
     elapsed_time = time.time() - start_time
     print(f"Success rate: {stats['success_rate']:.2f}")
     print(f"Success count: {stats['success_count']}")

@@ -70,6 +70,11 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         # Flatten the batch
         flat_batch_queries = [query for traj in batch_queries for query in traj]
         flat_batch_responses = [response for traj in batch_responses for response in traj]
+        flat_advantages = [torch.tensor(a, dtype=torch.float32) for a in flat_advantages]
+        
+        flat_batch_queries = flat_batch_queries[:self.config.batch_size]
+        flat_batch_responses = flat_batch_responses[:self.config.batch_size]
+        flat_advantages = flat_advantages[:self.config.batch_size]
         
         self.step(
             flat_batch_queries,
