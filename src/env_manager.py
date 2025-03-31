@@ -16,6 +16,7 @@ class EnvManager:
         self.invalid_action_penalty = invalid_action_penalty
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
+        # breakpoint()
         self.reasoning_flag = reasoning_flag
 
     def reset(self) -> Tuple[str, str]:
@@ -26,6 +27,7 @@ class EnvManager:
         return mission, text_obs
 
     def step(self, text_action: str) -> Tuple[str, float, bool]:
+        # breakpoint()
         if self.reasoning_flag:
             text_action = text_action.split("final answer:")[-1].strip()
             action = utils.text_to_action.get(text_action, None)

@@ -74,10 +74,10 @@ def get_system_prompt(reasoning_flag=False) -> str:
         str: The system prompt
     """
     if reasoning_flag:
-        with open("resources/system_prompt.txt", "r") as f:
+        with open("resources/system_prompt_reasoning.txt", "r") as f:
             system_prompt = f.read()
     else:
-        with open("resources/system_prompt_reasoning.txt", "r") as f:
+        with open("resources/system_prompt.txt", "r") as f:
             system_prompt = f.read()
     return system_prompt
 

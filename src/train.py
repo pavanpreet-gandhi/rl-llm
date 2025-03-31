@@ -83,12 +83,13 @@ def setup_training(args, logger: logging.Logger):
     logger.info(f"Using device: {device}")
 
     # Set up environment managers
+    # breakpoint()
     env_managers = [
         EnvManager(
             gym.make(args.env_id, seed=i),
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
-            reasoning_flag=args.reasoning_flag,  # TODO: True
+            reasoning_flag=args.reasoning_flag,  
         )
         for i in range(args.num_envs)
     ]
