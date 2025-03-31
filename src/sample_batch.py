@@ -63,7 +63,7 @@ def sample_batch(
 
     # Initialize variables
     num_envs = len(env_managers)
-    successful_episode_count, total_episode_count, success_rewards = 0, 0, 0
+    successful_episode_count, total_episode_count, success_rewards, total_length = 0, 0, 0, 0
     total_generate_time, total_generate_count = 0, 0
     Q, R, W, D = [], [], [], [] # Query, Response, Reward and done tensors
     query_tensors_per_episode = [[] for _ in range(num_envs)]
@@ -83,7 +83,7 @@ def sample_batch(
             logger.info(f"SYSTEM: {context[0]['content']}")
             logger.info(f"USER: {context[1]['content']}")
 
-    while len(W) < batch_size:
+    while total_length < batch_size:
         
         start_time = time.time()
         query_tensors_step = []
@@ -134,6 +134,7 @@ def sample_batch(
                 successful_episode_count += 1 if success else 0
                 success_rewards += reward if success else 0
                 episode_length = len(rewards_per_episode[i])
+                total_length += episode_length
                 # Append trajectory to Q, R, W
                 Q.append(query_tensors_per_episode[i])
                 R.append(response_tensors_per_episode[i])
@@ -187,7 +188,7 @@ if __name__=="__main__":
     env_id = "BabyAI-GoToObj-v0" # "BabyAI-MixedTrainLocal-v0"
     context_window = 1
 
-    num_envs = 1
+    num_envs = 4
     env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
     batch_size = 8
 
@@ -198,3 +199,4 @@ if __name__=="__main__":
     print(f"Success count: {stats['success_count']}")
     print(f"Total count: {stats['total_count']}")
     print(f"Sampling batch took {elapsed_time:.2f} seconds")
+    print(W)
