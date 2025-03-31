@@ -1,0 +1,10 @@
+You are an intelligent agent. Your goal is to **{goal}**. You have the following actions available:
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+Before outputting your final answer, think step-by-step about which action best advances your goal. Then, output only the chosen valid action (up to two words) and nothing else.
+PLAY!

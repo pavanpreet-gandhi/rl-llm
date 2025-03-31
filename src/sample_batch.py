@@ -7,7 +7,7 @@ from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create
 from typing import Dict, List, Any, Tuple
 import logging
 import numpy as np
-
+import time
 
 def td_lambda_targets(rewards, next_values, gamma=0.99, lam=0.95):
     """
@@ -44,7 +44,6 @@ def td_lambda_targets(rewards, next_values, gamma=0.99, lam=0.95):
 
     return targets
 
-
 def sample_batch(
         env_managers: List[EnvManager], 
         tokenizer: PreTrainedTokenizer, 
@@ -66,7 +65,8 @@ def sample_batch(
 
     # Initialize variables
     num_envs = len(env_managers)
-    success_count, total_count, success_rewards = 0, 0, 0
+    successful_episode_count, total_episode_count, success_rewards = 0, 0, 0
+    total_generate_time, total_generate_count = 0, 0
     Q, R, W = [], [], [] # Query, Response, and Reward tensors
     query_tensors_per_episode = [[] for _ in range(num_envs)]
     response_tensors_per_episode = [[] for _ in range(num_envs)]
@@ -87,7 +87,7 @@ def sample_batch(
 
     while len(W) < batch_size:
         
-        # Obtain query tensors for each environment
+        start_time = time.time()
         query_tensors_step = []
         for context in contexts:
             query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
@@ -101,6 +101,9 @@ def sample_batch(
         )
         # Decode response tensors to text
         response_texts_step = tokenizer.batch_decode(response_tensors_step, skip_special_tokens=True)
+        generate_time = time.time() - start_time
+        total_generate_time += generate_time
+        total_generate_count += 1
         
         # Process each environment's response
         for i, (env, response_text) in enumerate(zip(env_managers, response_texts_step)):
@@ -135,12 +138,12 @@ def sample_batch(
             if done:
                 # Track success
                 success = True if reward > 0 else False
-                total_count += 1
-                success_count += 1 if success else 0
+                total_episode_count += 1
+                successful_episode_count += 1 if success else 0
                 success_rewards += reward if success else 0
-                # Compute TD(λ) targets
-                next_state_values_per_episode[i][-1] = 0.0 # Set value of terminal state to 0
-                targets = td_lambda_targets(rewards_per_episode[i], next_state_values_per_episode[i], gamma=gamma, lam=lam)
+                episode_length = len(rewards_per_episode[i])
+                for j in range(len(rewards_per_episode[i])-1):
+                    rewards_per_episode[i][j] += rewards_per_episode[i][-1]
                 # Append trajectory to Q, R, W
                 Q.extend(query_tensors_per_episode[i])
                 R.extend(response_tensors_per_episode[i])
@@ -153,7 +156,7 @@ def sample_batch(
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text_obs}]
                 if logger is not None:
-                    logger.info(f"Environment {i} finished with success: {success}, resetting...")
+                    logger.info(f"Environment {i} finished with success: {success} in {episode_length} steps")
                     logger.info("-"*20)
                     logger.info(f"SYSTEM: {contexts[i][0]['content']}")
                     logger.info(f"USER: {contexts[i][1]['content']}")
@@ -162,13 +165,15 @@ def sample_batch(
     W = [torch.tensor(w, dtype=torch.float32) for w in W]
     
     # Compute stats
-    success_rate = success_count / total_count if total_count > 0 else 0
-    avg_success_reward = success_rewards / success_count if success_count > 0 else 0
+    success_rate = successful_episode_count / total_episode_count if total_episode_count > 0 else 0
+    avg_success_reward = success_rewards / successful_episode_count if successful_episode_count > 0 else 0
+    avg_generate_time = total_generate_time / total_generate_count if total_generate_count > 0 else 0
     stats = {
         "success_rate": success_rate,
-        "total_count": total_count,
-        "success_count": success_count,
+        "total_count": total_episode_count,
+        "success_count": successful_episode_count,
         "avg_success_reward": avg_success_reward,
+        "avg_generate_time": avg_generate_time,
     }
     return Q, R, W, stats
 
@@ -177,7 +182,7 @@ if __name__=="__main__":
     import time
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = PPOConfig(batch_size=4, mini_batch_size=4)
-    model_id = "meta-llama/Llama-3.2-3B-Instruct"
+    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct" # "meta-llama/Llama-3.2-3B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
