@@ -53,7 +53,7 @@ def sample_batch(
         query_tensors_step = []
         for context in contexts:
             if len(context) > (2 * context_window + 1):
-                context = context[0:1] + context[-(2*context_window):]
+                context = context[0:1] + context[-(2*context_window)+1:]
             query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
             query_tensors_step.append(query_tensor)
         
@@ -144,7 +144,7 @@ if __name__=="__main__":
         "temperature": 0.8,
     }
     env_id = "BabyAI-GoToPickupOnly-v0" # "BabyAI-MixedTrainLocal-v0"
-    context_window = 5
+    context_window = 3
 
     num_envs = 1
     env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
