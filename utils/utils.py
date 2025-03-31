@@ -75,10 +75,10 @@ def get_system_prompt(reasoning_flag=False) -> str:
     """
     if reasoning_flag:
         with open("resources/system_prompt.txt", "r") as f:
-        system_prompt = f.read()
+            system_prompt = f.read()
     else:
         with open("resources/system_prompt_reasoning.txt", "r") as f:
-        system_prompt = f.read()
+            system_prompt = f.read()
     return system_prompt
 
 
@@ -89,6 +89,5 @@ action_to_text = {
     3: "pick up",
     4: "drop",
     5: "toggle",
-    6: "done",
 }
 text_to_action = {v: k for k, v in action_to_text.items()}

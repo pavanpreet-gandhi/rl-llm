@@ -1,7 +1,7 @@
 You are an agent. Your goal is to **{goal}**. Below are actions you choose:
 
 turn left
-turn righ
+turn right
 go forward
 pick up
 drop
