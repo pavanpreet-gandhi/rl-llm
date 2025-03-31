@@ -11,7 +11,7 @@ import gym
 import babyai_text
 import torch
 from transformers import PreTrainedTokenizer, AutoTokenizer
-from trl import PPOConfig, PPOTrainer, AutoModelForCausalLMWithValueHead, create_reference_model
+from trl import PPOConfig, AutoModelForCausalLMWithValueHead, create_reference_model
 from peft import LoraConfig, get_peft_model
 import wandb
 from huggingface_hub import HfApi, create_repo
@@ -19,6 +19,7 @@ from huggingface_hub import HfApi, create_repo
 import utils
 from env_manager import EnvManager
 from sample_batch import sample_batch
+from TrajactoryPPOTrainer import BatchedTrajectoryPPOTrainer
 
 
 def parse_args() -> Dict[str, Any]:
@@ -69,6 +70,10 @@ def parse_args() -> Dict[str, Any]:
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
+
+        # RL config
+        "gamma": 0.9,
+        "lmbda": 0.95,
     }
     args = SimpleNamespace(**args) # same type as argparse would return
     return args
@@ -137,7 +142,7 @@ def setup_training(args, logger: logging.Logger):
         exp_name=args.experiment_name,
         log_with="wandb",
     )
-    trainer = PPOTrainer(config, model, ref_model, tokenizer)
+    trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lmbda)
     logger.info("Initialized PPO Trainer")
     
     # Set up generation kwargs for sampling trajectories

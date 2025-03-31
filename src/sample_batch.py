@@ -51,9 +51,7 @@ def sample_batch(
         generation_kwargs: Dict[str, Any],
         batch_size: int,
         logger: logging.Logger = None,
-        context_window: int = 5, # Number of previous experiences to keep in 
-        gamma: float = 1,
-        lam: float = 0.95,
+        context_window: int = 5 # Number of previous experiences to keep in 
     ) -> Tuple[List[torch.Tensor], List[float], List[torch.Tensor]]:
     """"
     Sample a batch of experiences from the environment.
@@ -67,11 +65,11 @@ def sample_batch(
     num_envs = len(env_managers)
     successful_episode_count, total_episode_count, success_rewards = 0, 0, 0
     total_generate_time, total_generate_count = 0, 0
-    Q, R, W = [], [], [] # Query, Response, and Reward tensors
+    Q, R, W, D = [], [], [], [] # Query, Response, Reward and done tensors
     query_tensors_per_episode = [[] for _ in range(num_envs)]
     response_tensors_per_episode = [[] for _ in range(num_envs)]
     rewards_per_episode = [[] for _ in range(num_envs)]
-    next_state_values_per_episode = [[] for _ in range(num_envs)]
+    dones_per_episode = [[] for _ in range(num_envs)]
 
     # Reset envs and initialize contexts
     contexts = [[] for _ in range(num_envs)]
@@ -115,6 +113,7 @@ def sample_batch(
             # Take step in the environment and save reward
             text_obs, reward, done = env.step(response_text)
             rewards_per_episode[i].append(reward)
+            dones_per_episode[i].append(done)
 
             # Update context with the new obs from the environment
             contexts[i].append({"role": "assistant", "content": response_text})
@@ -123,17 +122,10 @@ def sample_batch(
             if len(context) > (2 * context_window + 1):
                 context = context[0:1] + context[-(2*context_window):]
 
-            # Compute value of next state
-            new_query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt").to(trainer.current_device)
-            with torch.no_grad():
-                logits, _, values = trainer.model(new_query_tensor)
-                value = values[0, -1].item()
-            next_state_values_per_episode[i].append(value)
-
             if i==0 and logger is not None:
                 logger.info(f"ASSISTANT: {response_text}")
                 logger.info(f"USER: {text_obs}")
-                logger.info(f"REWARD: {reward} | DONE: {done} | VALUE: {value}")
+                logger.info(f"REWARD: {reward} | DONE: {done}")
 
             if done:
                 # Track success
@@ -142,12 +134,10 @@ def sample_batch(
                 successful_episode_count += 1 if success else 0
                 success_rewards += reward if success else 0
                 episode_length = len(rewards_per_episode[i])
-                for j in range(len(rewards_per_episode[i])-1):
-                    rewards_per_episode[i][j] += rewards_per_episode[i][-1]
                 # Append trajectory to Q, R, W
                 Q.extend(query_tensors_per_episode[i])
                 R.extend(response_tensors_per_episode[i])
-                W.extend(targets)
+                W.extend(rewards_per_episode[i])
                 # Reset env and contexts
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
