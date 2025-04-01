@@ -4,14 +4,15 @@ from typing import Tuple
 
 class EnvManager:
 
-    def __init__(self, env: gym.Env, invalid_action_penalty: float = -0.1, consecutive_invalid_actions_allowed: int = 5):
-        self.env = env
+    def __init__(self, env_id: str, invalid_action_penalty: float = -0.1, consecutive_invalid_actions_allowed: int = 5):
+        self.env_id = env_id
         self.invalid_action_penalty = invalid_action_penalty
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
         self.task = None
     
     def reset(self) -> Tuple[str, str]:
+        self.env = gym.make(self.env_id)
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
         mission = obs["mission"]

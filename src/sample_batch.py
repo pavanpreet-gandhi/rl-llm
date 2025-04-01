@@ -10,8 +10,7 @@ import time
 
 
 def sample_batch(
-        env_id: str, 
-        num_envs: int,
+        env_managers: List[EnvManager],
         tokenizer: PreTrainedTokenizer, 
         trainer: PPOTrainer,
         generation_kwargs: Dict[str, Any],
@@ -28,7 +27,7 @@ def sample_batch(
         logger.setLevel(logging.INFO)
 
     # Initialize variables
-    env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
+    num_envs = len(env_managers)
     generate_times = []
     success_count_by_task = {task: 0 for task in utils.task_types}
     total_count_by_task = {task: 0 for task in utils.task_types}
@@ -105,8 +104,7 @@ def sample_batch(
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
                 rewards_per_episode[i] = []
-                env = EnvManager(gym.make(env_id, seed=i))
-                env_managers[i] = env
+                env.reset()
                 mission, text_obs = env.reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text_obs}]
@@ -171,9 +169,17 @@ if __name__=="__main__":
     context_window = 3
     num_envs = 1
     batch_size = 8
+    env_managers = [
+        EnvManager(
+            env_id, 
+            invalid_action_penalty=-2,
+            consecutive_invalid_actions_allowed=5,
+        )
+        for i in range(num_envs)
+    ]
 
     start_time = time.time()
-    Q, R, W, stats = sample_batch(env_id, num_envs, tokenizer, trainer, generation_kwargs, batch_size, context_window=context_window)
+    Q, R, W, stats = sample_batch(env_managers, tokenizer, trainer, generation_kwargs, batch_size, context_window=context_window)
     elapsed_time = time.time() - start_time
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
     from pprint import pprint
