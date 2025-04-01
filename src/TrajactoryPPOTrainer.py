@@ -1,6 +1,8 @@
 import torch
 from typing import List
 from trl import PPOTrainer, PPOConfig
+from trl.core import PPODecorators
+import math
 
 class BatchedTrajectoryPPOTrainer(PPOTrainer):
     def __init__(self, config: PPOConfig, model, ref_model, tokenizer, gamma=0.9, gae_lambda=0.95):
@@ -31,6 +33,7 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
             batch_advantages.append(advantages)
         return batch_advantages
 
+    @PPODecorators.empty_device_cache()
     def train_on_batch(self, 
                        batch_queries: List[List[torch.LongTensor]],
                        batch_responses: List[List[torch.LongTensor]], 
@@ -42,16 +45,53 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         
         batch_values = []
         
+        self.model.eval()
+        
         for i in range(len(batch_queries)):
-            this_traj_queries = batch_queries[i]
-            this_traj_responses = batch_responses[i]
+            this_traj_queries = [q.to(self.current_device, non_blocking=True) for q in batch_queries[i]]
+            this_traj_responses = [r.to(self.current_device, non_blocking=True) for r in batch_responses[i]]
+            model_inputs = self.prepare_model_inputs(this_traj_queries, this_traj_responses)
             
-            self.model.eval()
-            with torch.no_grad():
-                model_inputs = self.prepare_model_inputs(this_traj_queries, this_traj_responses)
-                values = self.model(**model_inputs).value[:, 0].cpu().tolist()
-                batch_values.append(values)
-            self.model.train()
+            if self.is_distributed:
+                pad_first = self.tokenizer.padding_side == "left"
+
+                model_inputs["input_ids"] = self.accelerator.pad_across_processes(
+                    model_inputs["input_ids"],
+                    dim=1,
+                    pad_index=self.tokenizer.pad_token_id,
+                    pad_first=pad_first,
+                )
+                model_inputs["attention_mask"] = self.accelerator.pad_across_processes(
+                    model_inputs["attention_mask"], dim=1, pad_index=0, pad_first=pad_first
+                )
+                if self.is_encoder_decoder:
+                    model_inputs["decoder_input_ids"] = self.accelerator.pad_across_processes(
+                        model_inputs["decoder_input_ids"],
+                        dim=1,
+                        pad_index=self.tokenizer.pad_token_id,
+                        pad_first=pad_first,
+                    )
+                    model_inputs["decoder_attention_mask"] = self.accelerator.pad_across_processes(
+                        model_inputs["decoder_attention_mask"],
+                        dim=1,
+                        pad_index=0,
+                        pad_first=pad_first,
+                    )
+            
+            this_size = len(this_traj_queries)
+            mini_batch_size = 8
+            
+            mini_batch_values = []
+            
+            for i in range(math.ceil(this_size / mini_batch_size)):
+                input_kwargs = {key: value[i * mini_batch_size : (i + 1) * mini_batch_size] for key, value in model_inputs.items()}
+                with torch.no_grad():
+                    values = self.model(**input_kwargs)[2][:, 0].cpu().tolist()
+                    mini_batch_values.extend(values)
+            batch_values.append(mini_batch_values)
+            del this_traj_queries, this_traj_responses, model_inputs, values, mini_batch_values
+            torch.cuda.empty_cache()
+        self.model.train()
         
         # Compute GAE advantages
         batch_advantages = self.compute_gae_batch(batch_rewards, batch_values, batch_dones)
@@ -76,8 +116,9 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         flat_batch_responses = flat_batch_responses[:self.config.batch_size]
         flat_advantages = flat_advantages[:self.config.batch_size]
         
-        self.step(
+        stats = self.step(
             flat_batch_queries,
             flat_batch_responses,
             flat_advantages,  # Using GAE as reward
         )
+        return stats

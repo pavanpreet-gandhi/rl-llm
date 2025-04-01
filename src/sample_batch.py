@@ -144,6 +144,7 @@ def sample_batch(
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
                 rewards_per_episode[i] = []
+                dones_per_episode[i] = []
                 mission, text_obs = env.reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text_obs}]
@@ -171,7 +172,7 @@ if __name__=="__main__":
     import time
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = PPOConfig(batch_size=4, mini_batch_size=4)
-    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct" # "meta-llama/Llama-3.2-3B-Instruct"
+    model_id = "meta-llama/Llama-3.2-3B-Instruct" #"HuggingFaceTB/SmolLM2-135M-Instruct" # 
     tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from tqdm import tqdm
 import os, sys
 import math
+import itertools
 
 import gym
 import babyai_text
@@ -41,12 +42,12 @@ def parse_args() -> Dict[str, Any]:
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", 
         "env_id": "BabyAI-GoToLocal-v0",
         "num_shared_layers": None,
-        "num_steps_train": 1000,
+        "num_steps_train": 10,
         "num_envs": 4, # TODO: 4
         
         # PPO config
-        "batch_size": 128, # TODO: 128
-        "mini_batch_size": 32, # TODO: 64
+        "batch_size": 32, # TODO: 128
+        "mini_batch_size": 4, # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
@@ -220,9 +221,10 @@ def train(args, logger: logging.Logger):
         wandb.log(metrics, step=step)
         logger.info(f"TRAINING STEP {step} COMPLETED")
         # Log trainer stats
-        query = tokenizer.batch_decode(query_tensors.flatten(), skip_special_tokens=True)
-        response = tokenizer.batch_decode(response_tensors.flatten(), skip_special_tokens=True)
+        query = tokenizer.batch_decode(list(itertools.chain.from_iterable(query_tensors))[:args.batch_size], skip_special_tokens=True)
+        response = tokenizer.batch_decode(list(itertools.chain.from_iterable(response_tensors))[:args.batch_size], skip_special_tokens=True)
         batch = {'query': query, 'response': response}
+        rewards = list(itertools.chain.from_iterable(rewards))[:args.batch_size]
         trainer.log_stats(stats, batch, rewards)
         
         # Save checkpoint if needed
