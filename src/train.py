@@ -32,10 +32,10 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-ppo-experiments",  # TODO: "babyai-ppo-experiments"
+        "project_name": "babyai-ppo", # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-        "push_to_hub": True,  # TODO: True
-        "hub_model_id": None,  # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
+        "push_to_hub": False, # TODO: True
+        "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
         "save_every": 25,  # TODO: 25
         "checkpoint_dir": "checkpoints",
@@ -86,7 +86,7 @@ def setup_training(args, logger: logging.Logger):
     # breakpoint()
     env_managers = [
         EnvManager(
-            gym.make(args.env_id, seed=i),
+            env_id=args.env_id, 
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
             reasoning_flag=args.reasoning_flag,  

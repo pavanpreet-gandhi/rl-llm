@@ -4,6 +4,8 @@ from datetime import datetime
 from rich.logging import RichHandler
 from rich.console import Console
 from rich.theme import Theme
+from collections import OrderedDict
+
 
 
 def create_logger(
@@ -91,3 +93,25 @@ action_to_text = {
     5: "toggle",
 }
 text_to_action = {v: k for k, v in action_to_text.items()}
+
+
+task_types = ["goto", "pickup", "putnext", "open", "pick up seq go to"]
+
+
+keyword_to_task = OrderedDict([
+    ("then", "pick up seq go to"),
+    ("after", "pick up seq go to"),
+    ("go to", "goto"),
+    ("pick up", "pickup"),
+    ("open", "open"),
+    ("put", "putnext"),
+])
+
+def get_task_from_mission(mission: str) -> str:
+    """
+    Extracts the task from the mission string.
+    """
+    for keyword, task in keyword_to_task.items():
+        if keyword in mission:
+            return task
+    return "unknown"

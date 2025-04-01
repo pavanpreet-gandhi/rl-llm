@@ -5,27 +5,26 @@ from typing import Tuple
 
 class EnvManager:
 
-    def __init__(
-        self,
-        env: gym.Env,
-        invalid_action_penalty: float = -0.1,
-        consecutive_invalid_actions_allowed: int = 5,
-        reasoning_flag: bool = False,
-    ):
-        self.env = env
+    def __init__(self, env_id: str, invalid_action_penalty: float = -0.1, consecutive_invalid_actions_allowed: int = 5, reasoning_flag: bool = False):
+        self.env_id = env_id
         self.invalid_action_penalty = invalid_action_penalty
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
-        # breakpoint()
+        self.task = None
         self.reasoning_flag = reasoning_flag
-
+    
     def reset(self) -> Tuple[str, str]:
+        self.env = gym.make(self.env_id)
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
         mission = obs["mission"]
+        self.task = utils.get_task_from_mission(mission)
         text_obs = "\n".join(info["descriptions"])
         return mission, text_obs
-
+    
+    def get_task(self) -> str:
+        return self.task
+    
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         # breakpoint()
         if self.reasoning_flag:
