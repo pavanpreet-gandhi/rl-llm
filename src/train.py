@@ -38,10 +38,10 @@ def parse_args() -> Dict[str, Any]:
         "push_to_hub": True,  # TODO: True
         "hub_model_id": None,  # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
-        "save_every": 1,  # TODO: 25
+        "save_every": 25,  # TODO: 25
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "Heisenger/babyai-ppo-experiments-2025-04-01_22-42-36", # add path for the pretrained model "your-hf-username/your-model-repo"
+        "pretrained_dir": "", # add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": False,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
@@ -51,7 +51,7 @@ def parse_args() -> Dict[str, Any]:
         "num_envs": 4,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
-        "mini_batch_size": 8,  # TODO: 64
+        "mini_batch_size": 16,  # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
@@ -65,7 +65,7 @@ def parse_args() -> Dict[str, Any]:
         "top_k": 0.0,  # no top-k sampling
         "top_p": 1.0,  # no nucleus sampling
         "do_sample": True,  # yes, we want to sample
-        "max_new_tokens": 30,
+        "max_new_tokens": 15,
         "temperature": 0.8,
         # PEFT config
         "use_peft": True,
