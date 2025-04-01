@@ -10,7 +10,8 @@ import time
 
 
 def sample_batch(
-        env_managers: List[EnvManager], 
+        env_id: str, 
+        num_envs: int,
         tokenizer: PreTrainedTokenizer, 
         trainer: PPOTrainer,
         generation_kwargs: Dict[str, Any],
@@ -27,9 +28,12 @@ def sample_batch(
         logger.setLevel(logging.INFO)
 
     # Initialize variables
-    num_envs = len(env_managers)
-    successful_episode_count, total_episode_count, success_rewards = 0, 0, 0
-    total_generate_time, total_generate_count = 0, 0
+    env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
+    generate_times = []
+    success_count_by_task = {task: 0 for task in utils.task_types}
+    total_count_by_task = {task: 0 for task in utils.task_types}
+    success_reward_by_task = {task: 0 for task in utils.task_types}
+    episode_length_by_task = {task: 0 for task in utils.task_types}
     Q, R, W = [], [], [] # Query, Response, and Reward tensors
     query_tensors_per_episode = [[] for _ in range(num_envs)]
     response_tensors_per_episode = [[] for _ in range(num_envs)]
@@ -64,8 +68,7 @@ def sample_batch(
         )
         response_texts_step = tokenizer.batch_decode(response_tensors_step, skip_special_tokens=True)
         generate_time = time.time() - start_time
-        total_generate_time += generate_time
-        total_generate_count += 1
+        generate_times.append(generate_time)
         
         for i, (env, response_text) in enumerate(zip(env_managers, response_texts_step)):
 
@@ -84,13 +87,16 @@ def sample_batch(
 
             if done:
                 # Discount future rewards if successful
+                task = env.get_task()
                 success = True if reward > 0 else False
-                total_episode_count += 1
-                successful_episode_count += 1 if success else 0
-                success_rewards += reward if success else 0
+                total_count_by_task[task] += 1
+                success_count_by_task[task] += 1 if success else 0
+                success_reward_by_task[task] += reward if success else 0
                 episode_length = len(rewards_per_episode[i])
-                for j in range(len(rewards_per_episode[i])-1):
-                    rewards_per_episode[i][j] += rewards_per_episode[i][-1]
+                episode_length_by_task[task] += episode_length
+                if success:
+                    for j in range(len(rewards_per_episode[i])-1):
+                        rewards_per_episode[i][j] += rewards_per_episode[i][-1]
                 # Append trajectory to Q, R, W
                 Q.extend(query_tensors_per_episode[i])
                 R.extend(response_tensors_per_episode[i])
@@ -99,6 +105,8 @@ def sample_batch(
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
                 rewards_per_episode[i] = []
+                env = EnvManager(gym.make(env_id, seed=i))
+                env_managers[i] = env
                 mission, text_obs = env.reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text_obs}]
@@ -112,16 +120,32 @@ def sample_batch(
     W = [torch.tensor(w, dtype=torch.float32) for w in W]
     
     # Compute stats
-    success_rate = successful_episode_count / total_episode_count if total_episode_count > 0 else 0
-    avg_success_reward = success_rewards / successful_episode_count if successful_episode_count > 0 else 0
-    avg_generate_time = total_generate_time / total_generate_count if total_generate_count > 0 else 0
+    total_count = sum(total_count_by_task.values())
+    success_count = sum(success_count_by_task.values())
+    success_rate = success_count / total_count if total_count > 0 else 0
+    avg_success_reward = sum(success_reward_by_task.values()) / success_count if success_count > 0 else 0
+    avg_episode_length = sum(episode_length_by_task.values()) / success_count if success_count > 0 else 0
+    total_generate_time = sum(generate_times)
+    min_generate_time = min(generate_times)
+    max_generate_time = max(generate_times)
     stats = {
+        "total_count": total_count,
         "success_rate": success_rate,
-        "total_count": total_episode_count,
-        "success_count": successful_episode_count,
         "avg_success_reward": avg_success_reward,
-        "avg_generate_time": avg_generate_time,
+        "avg_episode_length": avg_episode_length,
+        "total_generate_time": total_generate_time,
+        "min_generate_time": min_generate_time,
+        "max_generate_time": max_generate_time,
     }
+    success_rate_by_task = {task: success_count_by_task[task] / total_count_by_task[task] if total_count_by_task[task] > 0 else 0 for task in utils.task_types}
+    avg_success_reward_by_task = {task: success_reward_by_task[task] / success_count_by_task[task] if success_count_by_task[task] > 0 else 0 for task in utils.task_types}
+    avg_episode_length_by_task = {task: episode_length_by_task[task] / success_count_by_task[task] if success_count_by_task[task] > 0 else 0 for task in utils.task_types}
+    for task in utils.task_types:
+        stats[f"total_count_{task}"] = total_count_by_task[task]
+        stats[f"success_rate_{task}"] = success_rate_by_task[task]
+        stats[f"avg_success_reward_{task}"] = avg_success_reward_by_task[task]
+        stats[f"avg_episode_length_{task}"] = avg_episode_length_by_task[task]
+
     return Q, R, W, stats
 
 
@@ -143,17 +167,14 @@ if __name__=="__main__":
         "top_p": 0.95,
         "temperature": 0.8,
     }
-    env_id = "BabyAI-GoToPickupOnly-v0" # "BabyAI-MixedTrainLocal-v0"
+    env_id = "BabyAI-MixedTrainLocal-v0"
     context_window = 3
-
     num_envs = 1
-    env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
     batch_size = 8
 
     start_time = time.time()
-    Q, R, W, stats = sample_batch(env_managers, tokenizer, trainer, generation_kwargs, batch_size, context_window=context_window)
+    Q, R, W, stats = sample_batch(env_id, num_envs, tokenizer, trainer, generation_kwargs, batch_size, context_window=context_window)
     elapsed_time = time.time() - start_time
-    print(f"Success rate: {stats['success_rate']:.2f}")
-    print(f"Success count: {stats['success_count']}")
-    print(f"Total count: {stats['total_count']}")
-    print(f"Sampling batch took {elapsed_time:.2f} seconds")
+    print(f"Elapsed time: {elapsed_time:.2f} seconds")
+    from pprint import pprint
+    pprint(f"Stats: {stats}")

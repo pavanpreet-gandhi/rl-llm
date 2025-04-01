@@ -9,13 +9,18 @@ class EnvManager:
         self.invalid_action_penalty = invalid_action_penalty
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
+        self.task = None
     
     def reset(self) -> Tuple[str, str]:
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
         mission = obs["mission"]
+        self.task = utils.get_task_from_mission(mission)
         text_obs = "\n".join(info["descriptions"])
         return mission, text_obs
+    
+    def get_task(self) -> str:
+        return self.task
     
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         action = utils.text_to_action.get(text_action, None)
