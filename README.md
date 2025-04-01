@@ -82,4 +82,13 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     ```
     In Train.py / parse_args(), change "entity": "OE_2025" to some other entities in your own account
     ```
+
+10. Loading pre-trained model:
+
+    To load pretrained model, in train.py / parse_args():
+
+    ```
+    "pretrained_dir": "your-hf-username/your-model-repo"
+    "load_checkpoint": True,
+    ```
     

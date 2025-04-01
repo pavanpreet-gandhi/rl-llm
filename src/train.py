@@ -19,7 +19,7 @@ from trl import (
 )
 from peft import LoraConfig, get_peft_model
 import wandb
-from huggingface_hub import HfApi, create_repo
+from huggingface_hub import HfApi, create_repo, hf_hub_download
 
 import utils
 from env_manager import EnvManager
@@ -38,8 +38,11 @@ def parse_args() -> Dict[str, Any]:
         "push_to_hub": True,  # TODO: True
         "hub_model_id": None,  # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
-        "save_every": 25,  # TODO: 25
+        "save_every": 1,  # TODO: 25
         "checkpoint_dir": "checkpoints",
+        # Load pretrained model
+        "pretrained_dir": "Heisenger/babyai-ppo-experiments-2025-04-01_22-42-36", # add path for the pretrained model "your-hf-username/your-model-repo"
+        "load_checkpoint": False,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",  # TODO: "BabyAI-MixedTrainLocal-v0"
@@ -48,7 +51,7 @@ def parse_args() -> Dict[str, Any]:
         "num_envs": 4,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
-        "mini_batch_size": 16,  # TODO: 64
+        "mini_batch_size": 8,  # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
@@ -62,7 +65,7 @@ def parse_args() -> Dict[str, Any]:
         "top_k": 0.0,  # no top-k sampling
         "top_p": 1.0,  # no nucleus sampling
         "do_sample": True,  # yes, we want to sample
-        "max_new_tokens": 15,
+        "max_new_tokens": 30,
         "temperature": 0.8,
         # PEFT config
         "use_peft": True,
@@ -116,13 +119,27 @@ def setup_training(args, logger: logging.Logger):
         logger.info("Not using PEFT")
 
     # Create model and tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id, padding_side="left")
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLMWithValueHead.from_pretrained(
-        args.model_id, peft_config=peft_config, torch_dtype=torch.bfloat16
-    ).to(device)
-    logger.info("Loaded model and tokenizer")
+    if args.load_checkpoint:
+        # Load model and tokenizer from checkpoint
+        pretrained_dir = args.pretrained_dir
+        # Load the base model and tokenizer
+        model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir)
+        tokenizer = AutoTokenizer.from_pretrained(pretrained_dir)
+
+        # Load the value head weights
+        value_head_path = hf_hub_download(repo_id=pretrained_dir, filename="value_head.bin")
+        model.v_head.load_state_dict(torch.load(value_head_path))
+
+        logger.info(f"Loaded model and tokenizer from {pretrained_dir}")
+
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(args.model_id, padding_side="left")
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        model = AutoModelForCausalLMWithValueHead.from_pretrained(
+            args.model_id, peft_config=peft_config, torch_dtype=torch.bfloat16
+        ).to(device)
+        logger.info("Loaded model and tokenizer from scratch")
 
     # Create reference model
     ref_model = create_reference_model(model, num_shared_layers=args.num_shared_layers)
@@ -249,6 +266,10 @@ def train(args, logger: logging.Logger):
             trainer.model.save_pretrained(
                 checkpoint_path
             )  # saves either the full model or just the PEFT adapters
+            # Save the value head weights
+            value_head_path = os.path.join(checkpoint_path, "value_head.bin")
+            torch.save(trainer.model.v_head.state_dict(), value_head_path)
+
             tokenizer.save_pretrained(checkpoint_path)
             logger.info(
                 f"Saved model checkpoint at step {step + 1} to {checkpoint_path}"
