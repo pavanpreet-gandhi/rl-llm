@@ -22,9 +22,9 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     
 1. Clone this repository
     ```bash
-    git clone <repo_url>
+    git clone https://github.com/pavanpreet-gandhi/rl-llm/
     cd rl-llm
-    git checkout <branch_name>
+    git checkout clean-mvp-dev
     ```
 2. Create and activate `.venv` environment
     ```bash
