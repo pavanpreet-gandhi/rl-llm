@@ -4,22 +4,6 @@
 This repositpry explores training LLMs with Reinforcement Learning (RL) using the BabyAI-Text environment. The goal is to create a framework that allows for the training of LLMs in a simulated environment, enabling them to learn from their interactions and improve their performance over time.
 
 ## Setup
-0. Connect to Cloud GPU
-
-    Connect from vscode to vast.ai
-    ```
-    ssh -i ~/.ssh/id_rsa -p 30077 root@185.150.27.254 -L 8080:localhost:8080
-    ```
-
-    Generate SSH key to connect vast.ai instance with github
-    ```
-    eval "$(ssh-agent -s)" # start ssh agent, not automatic on vast
-    ssh-keygen -t ed25519
-    ssh-add; ssh-add -l
-    echo "public key:"
-    cat ~/.ssh/id_ed25519.pub
-    ```
-
 1. Clone this repository
     ```bash
     git clone <repo_url>
