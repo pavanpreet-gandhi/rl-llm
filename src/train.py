@@ -48,15 +48,15 @@ def parse_args() -> Dict[str, Any]:
         "num_envs": 4,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
-        "mini_batch_size": 32,  # TODO: 64
+        "mini_batch_size": 16,  # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
         # Env config
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
-        "context_window": 1,  # Number of previous experiences to keep in context
-        "reasoning_flag": False,
+        "context_window": 2,  # Number of previous experiences to keep in context
+        "reasoning_flag": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 0.0,  # no top-k sampling
@@ -178,6 +178,19 @@ def train(args, logger: logging.Logger):
     env_managers, trainer, tokenizer, generation_kwargs, device, checkpoint_dir = (
         setup_training(args, logger)
     )
+    # Log key arguments to wandb
+    wandb.config.update({
+        "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "reasoning_flag": args.reasoning_flag,
+        "batch_size": args.batch_size,
+        "mini_batch_size": args.mini_batch_size,
+        "context_window": args.context_window,
+        "max_new_tokens": args.max_new_tokens,
+        "model_id": args.model_id,
+        "env_id": args.env_id,
+        "num_envs": args.num_envs,
+    })
+    logger.info("Logged key arguments to wandb")
 
     logger.info("STARTING TRAINING LOOP")
     for step in tqdm(range(args.num_steps_train)):
