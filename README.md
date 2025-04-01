@@ -36,9 +36,17 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     pip install -e .
     ```
 4. Install the requirements
+
+    For non vast-ai:
     ```bash
     pip install -r requirements.txt
     pip install numpy==1.23.1 tf-keras # fix dependancy issues
+    pip install --upgrade "jinja2>=3.1.0"
+    ```
+
+    For vast-ai:
+    ```bash
+    pip install -r requirements.txt
     pip install --upgrade "jinja2>=3.1.0"
     ```
 5. Install BabyAI-Text
@@ -52,8 +60,8 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
 6. Configure git
     ```bash
     git config --global credential.helper store
-    git config --global user.name "Pavan"
-    git config --global user.email "pavanpreet.gandhi@gmail.com"
+    git config --global user.name "Name"
+    git config --global user.email "email@ucl.ac.uk"
     ```
 7. Login to wandb (create an account first if you don't have one)
     ```bash
@@ -63,3 +71,15 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     ```bash
     huggingface-cli login
     ```
+9. Logging Settings:
+
+    If you are just running a trial and don't want to log:
+    
+    ```
+    Disable hugging face logging: in train.py / parse_args() change "push_to_hub" to False
+    ```
+    If you are doing a trial run and don't want to log to wandb group account:
+    ```
+    In Train.py / parse_args(), change "entity": "OE_2025" to some other entities in your own account
+    ```
+    
