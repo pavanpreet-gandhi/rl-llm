@@ -73,10 +73,10 @@ This repositpry explores training LLMs with Reinforcement Learning (RL) using th
     ```
 9. Logging Settings:
 
-    If you are just running a trial and don't want to log:
+    If you are just running a trial and don't want to log in hugging face:
     
     ```
-    Disable hugging face logging: in train.py / parse_args() change "push_to_hub" to False
+    In train.py / parse_args() change "push_to_hub" to False
     ```
     If you are doing a trial run and don't want to log to wandb group account:
     ```
