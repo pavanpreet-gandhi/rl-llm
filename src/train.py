@@ -55,6 +55,7 @@ def parse_args() -> Dict[str, Any]:
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 1,  # Number of previous experiences to keep in context
+        "reasoning_flag": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 0.0,  # no top-k sampling
@@ -68,7 +69,7 @@ def parse_args() -> Dict[str, Any]:
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
-        "reasoning_flag": True,
+
     }
     args = SimpleNamespace(**args)  # same type as argparse would return
     return args
