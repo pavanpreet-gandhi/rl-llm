@@ -114,7 +114,6 @@ def sample_batch(
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
                 rewards_per_episode[i] = []
-                env.reset()
                 mission, text_obs = env.reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [
@@ -123,11 +122,12 @@ def sample_batch(
                 ]
                 if logger is not None:
                     logger.info(
-                        f"Environment {i} finished with success: {success} in {episode_length} steps"
+                        f"Environment {i} finished {task} with success: {success} in {episode_length} steps"
                     )
                     logger.info("-" * 20)
-                    logger.info(f"SYSTEM: {contexts[i][0]['content']}")
-                    logger.info(f"USER: {contexts[i][1]['content']}")
+                    if i==0:
+                        logger.info(f"SYSTEM: {contexts[i][0]['content']}")
+                        logger.info(f"USER: {contexts[i][1]['content']}")
 
     # Convert rewards to tensors
     W = [torch.tensor(w, dtype=torch.float32) for w in W]

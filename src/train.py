@@ -32,18 +32,18 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-ppo", # TODO: "babyai-ppo-experiments"
+        "project_name": "babyai-ppo-experiments", # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
-        "push_to_hub": False, # TODO: True
+        "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
         "save_every": 25,  # TODO: 25
         "checkpoint_dir": "checkpoints",
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
-        "env_id": "BabyAI-GoToLocal-v0",
+        "env_id": "BabyAI-MixedTrainLocal-v0", # TODO: "BabyAI-MixedTrainLocal-v0"
         "num_shared_layers": None,
-        "num_steps_train": 1000,
+        "num_steps_train": 10_000,
         "num_envs": 4,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
@@ -55,7 +55,7 @@ def parse_args() -> Dict[str, Any]:
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 1,  # Number of previous experiences to keep in context
-        "reasoning_flag": True,
+        "reasoning_flag": False,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 0.0,  # no top-k sampling
@@ -198,14 +198,15 @@ def train(args, logger: logging.Logger):
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
 
+        # Log sampling stats to wandb
+        metrics["sample_time"] = sample_time
+        metrics["sampled_batch_size"] = len(rewards)
+
         # Select random subset of experiences (since sample_trajectories could return more than needed)
         indices = torch.randperm(len(rewards))[: args.batch_size].tolist()
         query_tensors = [query_tensors[i] for i in indices]
         response_tensors = [response_tensors[i] for i in indices]
         rewards = [rewards[i] for i in indices]
-        # Log sampling stats to wandb
-        metrics["sampled_batch_size"] = len(rewards)
-        metrics["sample_time"] = sample_time
 
         # Train step
         start_time = datetime.now()
