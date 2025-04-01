@@ -62,7 +62,7 @@ def parse_args() -> Dict[str, Any]:
         "top_k": 0.0,  # no top-k sampling
         "top_p": 1.0,  # no nucleus sampling
         "do_sample": True,  # yes, we want to sample
-        "max_new_tokens": 10,
+        "max_new_tokens": 15,
         "temperature": 0.8,
         # PEFT config
         "use_peft": True,
