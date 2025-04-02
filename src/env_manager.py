@@ -1,29 +1,32 @@
 import gym
 import utils
-from typing import Tuple
+from typing import Tuple, List
+import random
 
 
 class EnvManager:
 
-    def __init__(self, env_id: str, invalid_action_penalty: float = -0.1, consecutive_invalid_actions_allowed: int = 5, reasoning_flag: bool = False):
-        self.env_id = env_id
+    def __init__(
+        self,
+        env_ids: List[str], 
+        invalid_action_penalty: float = -0.1, 
+        consecutive_invalid_actions_allowed: int = 5, 
+        reasoning_flag: bool = False
+    ):
+        self.env_ids = env_ids
         self.invalid_action_penalty = invalid_action_penalty
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
-        self.task = None
         self.reasoning_flag = reasoning_flag
     
     def reset(self) -> Tuple[str, str]:
-        self.env = gym.make(self.env_id)
+        self.env_id = random.choice(self.env_ids)
+        self.env = gym.make(self.env_id, disable_env_checker=True)
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
         mission = obs["mission"]
-        self.task = utils.get_task_from_mission(mission)
         text_obs = "\n".join(info["descriptions"])
         return mission, text_obs
-    
-    def get_task(self) -> str:
-        return self.task
     
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         if self.reasoning_flag:
