@@ -47,6 +47,7 @@ def parse_args() -> Dict[str, Any]:
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
         "env_id": "BabyAI-MixedTrainLocal-v0",  # TODO: "BabyAI-MixedTrainLocal-v0"
+        "separate_vhead": False, 
         "num_shared_layers": None,
         "num_steps_train": 10_000,
         "num_envs": 4,  # TODO: 4
@@ -60,7 +61,7 @@ def parse_args() -> Dict[str, Any]:
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 2,  # Number of previous experiences to keep in context
-        "reasoning_flag": True,
+        "reasoning_flag": False,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 0.0,  # no top-k sampling
@@ -125,8 +126,9 @@ def setup_training(args, logger: logging.Logger):
         pretrained_dir = args.pretrained_dir
         # Load the base model and tokenizer
         model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir)
-        hidden_size = model.config.hidden_size
-        model.v_head = CustomValueHead(hidden_size)
+        if args.separate_vhead:
+            hidden_size = model.config.hidden_size
+            model.v_head = CustomValueHead(hidden_size)
         tokenizer = AutoTokenizer.from_pretrained(pretrained_dir)
 
         # Load the value head weights
@@ -144,8 +146,9 @@ def setup_training(args, logger: logging.Logger):
         model = AutoModelForCausalLMWithValueHead.from_pretrained(
             args.model_id, peft_config=peft_config, torch_dtype=torch.bfloat16
         ).to(device)
-        hidden_size = model.config.hidden_size
-        model.v_head = CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
+        if args.separate_vhead:
+            hidden_size = model.config.hidden_size
+            model.v_head = CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
         logger.info("Loaded model and tokenizer from scratch")
 
     # Create reference model
@@ -212,6 +215,7 @@ def train(args, logger: logging.Logger):
             "context_window": args.context_window,
             "max_new_tokens": args.max_new_tokens,
             "model_id": args.model_id,
+            "separate_vhead": args.separate_vhead,
             "env_id": args.env_id,
             "num_envs": args.num_envs,
         }
