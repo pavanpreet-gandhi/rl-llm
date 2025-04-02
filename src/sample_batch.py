@@ -111,6 +111,7 @@ def sample_batch(
             # Take step in the environment and save reward
             text_obs, reward, done = env.step(response_text)
             rewards_per_episode[i].append(reward)
+            dones_per_episode[i].append(done)
 
             # Update context with the new obs from the environment
             contexts[i].append({"role": "assistant", "content": response_text})
@@ -144,6 +145,7 @@ def sample_batch(
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
                 rewards_per_episode[i] = []
+                dones_per_episode[i] = []
                 mission, text_obs = env.reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text_obs}]

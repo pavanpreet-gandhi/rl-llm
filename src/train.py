@@ -45,8 +45,8 @@ def parse_args() -> Dict[str, Any]:
         "num_envs": 4, # TODO: change to 8
         
         # PPO config
-        "batch_size": 128, # TODO: change to 128
-        "mini_batch_size": 64, # TODO: change according to memory constraints
+        "batch_size": 64, # TODO: change to 128
+        "mini_batch_size": 16, # TODO: change according to memory constraints
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
@@ -66,7 +66,7 @@ def parse_args() -> Dict[str, Any]:
 
         # PEFT config
         "use_peft": True,
-        "lora_r": 32,
+        "lora_r": 8,
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
@@ -124,7 +124,7 @@ def setup_training(args, logger: logging.Logger):
     model = AutoModelForCausalLMWithValueHead.from_pretrained(
         args.model_id, 
         peft_config=peft_config, 
-        torch_dtype=torch.bfloat16
+        load_in_4bit=True
     ).to(device)
     logger.info("Loaded model and tokenizer")
     
