@@ -36,8 +36,8 @@ def parse_args() -> Dict[str, Any]:
         "project_name": "delete-me",  # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "entity": "OE_2025",
-        "push_to_hub": False, # TODO: True
-        "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
+        "push_to_hub": False,  # TODO: True
+        "hub_model_id": None,  # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
         "save_every": 10,  # TODO: 10
         "checkpoint_dir": "checkpoints",
@@ -45,8 +45,8 @@ def parse_args() -> Dict[str, Any]:
         "pretrained_dir": "Heisenger/babyai-ppo-experiments-2025-04-02_16-47-48",  # add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": False,
         # Training config
-        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct", # "meta-llama/Llama-3.2-3B-Instruct",
-        "separate_vhead": False, 
+        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct",  # "meta-llama/Llama-3.2-3B-Instruct",
+        "separate_vhead": False,
         "num_shared_layers": None,
         "num_steps_train": 10_000,
         "num_envs": 4,  # TODO: 4
@@ -134,7 +134,9 @@ def setup_training(args, logger: logging.Logger):
         value_head_path = hf_hub_download(
             repo_id=pretrained_dir, filename="value_head.bin"
         )
-        model.v_head.load_state_dict(torch.load(value_head_path))#.to(device).to(dtype=torch.bfloat16)
+        model.v_head.load_state_dict(
+            torch.load(value_head_path)
+        )  # .to(device).to(dtype=torch.bfloat16)
 
         logger.info(f"Loaded model and tokenizer from {pretrained_dir}")
 
@@ -147,7 +149,9 @@ def setup_training(args, logger: logging.Logger):
         ).to(device)
         if args.separate_vhead:
             hidden_size = model.config.hidden_size
-            model.v_head = CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
+            model.v_head = (
+                CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
+            )
         logger.info("Loaded model and tokenizer from scratch")
 
     # Create reference model
@@ -222,7 +226,23 @@ def train(args, logger: logging.Logger):
     logger.info("Logged key arguments to wandb")
 
     logger.info("STARTING TRAINING LOOP")
+
+    # Create logger for training
+    train_logger = logging.getLogger("train_logger")
+    # Create a file handler to write logs to a file
+    log_file = "training_logs.txt"
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+
+    # Create a formatter and add it to the handler
+    formatter = logging.Formatter("%(asctime)s - %(message)s")
+    file_handler.setFormatter(formatter)
+
+    # Add the handler to the logger
+    train_logger.addHandler(file_handler)
+
     for step in tqdm(range(args.num_steps_train)):
+        train_logger.info(f"TRAINING STEP {step + 1} STARTED")
 
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
@@ -236,6 +256,7 @@ def train(args, logger: logging.Logger):
             batch_size=args.batch_size,
             context_window=args.context_window,
             reasoning_flag=args.reasoning_flag,
+            logger=train_logger,
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
@@ -298,6 +319,11 @@ def train(args, logger: logging.Logger):
                 except Exception as e:
                     logger.error(f"Failed to push to hub: {e}")
                     logger.info("Continuing with training")
+    # Upload the training log file to wandb
+    artifact = wandb.Artifact("training_logs", type="log")
+    artifact.add_file("training_logs.txt")
+    wandb.log_artifact(artifact)
+    train_logger.info("Uploaded training_logs.txt to wandb")
 
 
 if __name__ == "__main__":
