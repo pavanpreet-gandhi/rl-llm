@@ -24,6 +24,7 @@ from huggingface_hub import HfApi, create_repo, hf_hub_download
 import utils
 from env_manager import EnvManager
 from sample_batch import sample_batch
+from custom_value_head import CustomValueHead
 
 
 def parse_args() -> Dict[str, Any]:
@@ -41,7 +42,7 @@ def parse_args() -> Dict[str, Any]:
         "save_every": 25,  # TODO: 25
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "", # add path for the pretrained model "your-hf-username/your-model-repo"
+        "pretrained_dir": "",  # add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": False,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
@@ -124,10 +125,14 @@ def setup_training(args, logger: logging.Logger):
         pretrained_dir = args.pretrained_dir
         # Load the base model and tokenizer
         model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir)
+        hidden_size = model.config.hidden_size
+        model.v_head = CustomValueHead(hidden_size)
         tokenizer = AutoTokenizer.from_pretrained(pretrained_dir)
 
         # Load the value head weights
-        value_head_path = hf_hub_download(repo_id=pretrained_dir, filename="value_head.bin")
+        value_head_path = hf_hub_download(
+            repo_id=pretrained_dir, filename="value_head.bin"
+        )
         model.v_head.load_state_dict(torch.load(value_head_path))
 
         logger.info(f"Loaded model and tokenizer from {pretrained_dir}")
@@ -139,6 +144,8 @@ def setup_training(args, logger: logging.Logger):
         model = AutoModelForCausalLMWithValueHead.from_pretrained(
             args.model_id, peft_config=peft_config, torch_dtype=torch.bfloat16
         ).to(device)
+        hidden_size = model.config.hidden_size
+        model.v_head = CustomValueHead(hidden_size).to(device)
         logger.info("Loaded model and tokenizer from scratch")
 
     # Create reference model
@@ -196,17 +203,19 @@ def train(args, logger: logging.Logger):
         setup_training(args, logger)
     )
     # Log key arguments to wandb
-    wandb.config.update({
-        "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "reasoning_flag": args.reasoning_flag,
-        "batch_size": args.batch_size,
-        "mini_batch_size": args.mini_batch_size,
-        "context_window": args.context_window,
-        "max_new_tokens": args.max_new_tokens,
-        "model_id": args.model_id,
-        "env_id": args.env_id,
-        "num_envs": args.num_envs,
-    })
+    wandb.config.update(
+        {
+            "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "reasoning_flag": args.reasoning_flag,
+            "batch_size": args.batch_size,
+            "mini_batch_size": args.mini_batch_size,
+            "context_window": args.context_window,
+            "max_new_tokens": args.max_new_tokens,
+            "model_id": args.model_id,
+            "env_id": args.env_id,
+            "num_envs": args.num_envs,
+        }
+    )
     logger.info("Logged key arguments to wandb")
 
     logger.info("STARTING TRAINING LOOP")
