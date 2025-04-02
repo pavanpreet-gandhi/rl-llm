@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Tuple
 import logging
 import numpy as np
 import time
+from TrajactoryPPOTrainer import log_memory
 
 def td_lambda_targets(rewards, next_values, gamma=0.99, lam=0.95):
     """
@@ -89,24 +90,32 @@ def sample_batch(
         # Obtain query tensors for each environment
         query_tensors_step = []
         for context in contexts:
-            query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
+            query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0).cpu()
+            logger.info(f"Context length: {len(context)}")
             query_tensors_step.append(query_tensor)
         
+        log_memory(logger, "Before generation")
+        
         # Generate responses for each environment
-        response_tensors_step = trainer.generate(
-            query_tensors_step,
-            generation_kwargs=generation_kwargs,
-            return_prompt=False,
-        )
+        with torch.no_grad():
+            response_tensors_step = trainer.generate(
+                query_tensors_step,
+                generation_kwargs=generation_kwargs,
+                return_prompt=False,
+            )
+        torch.cuda.empty_cache()
+        log_memory(logger, "After generation")
         # Decode response tensors to text
         response_texts_step = tokenizer.batch_decode(response_tensors_step, skip_special_tokens=True)
-        
+        log_memory(logger, "After decoding")
         # Process each environment's response
         for i, (env, response_text) in enumerate(zip(env_managers, response_texts_step)):
             
             # Save query and response tensors
-            query_tensors_per_episode[i].append(query_tensors_step[i])
-            response_tensors_per_episode[i].append(response_tensors_step[i])
+            query_tensors_per_episode[i].append(query_tensors_step[i].cpu())
+            response_tensors_per_episode[i].append(response_tensors_step[i].cpu())
+            logger.info(f"Query length: {query_tensors_step[0].shape[-1]}, "
+            f"Response length: {response_tensors_step[0].shape[-1]}")
 
             # Take step in the environment and save reward
             text_obs, reward, done = env.step(response_text)
@@ -132,11 +141,14 @@ def sample_batch(
                 success_count += 1 if success else 0
                 success_rewards += reward if success else 0
                 # Compute G_t targets
+                log_memory(logger, "Before compute returns")
                 targets = trainer.compute_returns(
                     query_tensors_per_episode[i], 
                     response_tensors_per_episode[i], 
                     rewards_per_episode[i], 
-                    dones_per_episode[i])
+                    dones_per_episode[i],
+                    logger=logger)
+                log_memory(logger, "After compute returns")
                 # Append trajectory to Q, R, W
                 Q.extend(query_tensors_per_episode[i])
                 R.extend(response_tensors_per_episode[i])
@@ -155,8 +167,10 @@ def sample_batch(
                     logger.info(f"SYSTEM: {contexts[i][0]['content']}")
                     logger.info(f"USER: {contexts[i][1]['content']}")
     
+    log_memory(logger, "Before tensoring W")
     # Convert rewards to tensors
     W = [torch.tensor(w, dtype=torch.float32) for w in W]
+    log_memory(logger, "After tensoring W")
     
     # Compute stats
     success_rate = success_count / total_count if total_count > 0 else 0

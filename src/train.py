@@ -19,7 +19,7 @@ from huggingface_hub import HfApi, create_repo
 import utils
 from env_manager import EnvManager
 from sample_batch import sample_batch
-from TrajactoryPPOTrainer import BatchedTrajectoryPPOTrainer
+from TrajactoryPPOTrainer import BatchedTrajectoryPPOTrainer, log_memory
 
 
 def parse_args() -> Dict[str, Any]:
@@ -41,13 +41,13 @@ def parse_args() -> Dict[str, Any]:
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",
         "env_id": "BabyAI-GoToObj-v0",
         "num_shared_layers": None,
-        "num_steps_train": 1000,
+        "num_steps_train": 10,
         "num_envs": 4, # TODO: change to 8
         
         # PPO config
-        "batch_size": 64, # TODO: change to 128
-        "mini_batch_size": 16, # TODO: change according to memory constraints
-        "optimize_device_cache": False,
+        "batch_size": 32, # TODO: change to 128
+        "mini_batch_size": 32, # TODO: change according to memory constraints
+        "optimize_device_cache": True,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
 
@@ -66,7 +66,7 @@ def parse_args() -> Dict[str, Any]:
 
         # PEFT config
         "use_peft": True,
-        "lora_r": 8,
+        "lora_r": 16,
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
@@ -124,12 +124,17 @@ def setup_training(args, logger: logging.Logger):
     model = AutoModelForCausalLMWithValueHead.from_pretrained(
         args.model_id, 
         peft_config=peft_config, 
-        load_in_4bit=True
+        load_in_8bit=True,
+        torch_dtype=torch.float16
     ).to(device)
+    model.config.use_cache = False
+    model.gradient_checkpointing_enable()
     logger.info("Loaded model and tokenizer")
     
     # Create reference model
     ref_model = create_reference_model(model, num_shared_layers=args.num_shared_layers)
+    ref_model.config.use_cache = False
+    ref_model.gradient_checkpointing_enable()
     logger.info(f"Created reference model with {args.num_shared_layers} shared layers")
     
     # Set up PPOTrainer object
@@ -185,6 +190,7 @@ def train(args, logger: logging.Logger):
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
         start_time = datetime.now()
+        log_memory(logger, "Before sampling")
         query_tensors, response_tensors, rewards, sampling_stats = sample_batch(
             env_managers,
             tokenizer,
@@ -194,6 +200,7 @@ def train(args, logger: logging.Logger):
             logger=logger,
             context_window=args.context_window,
         )
+        log_memory(logger, "After sampling")
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
         
@@ -213,6 +220,8 @@ def train(args, logger: logging.Logger):
         
         # Train step
         start_time = datetime.now()
+        torch.cuda.empty_cache()
+        log_memory(logger, "Before trainer step")
         stats = trainer.step(query_tensors, response_tensors, rewards)
         train_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Trainer step time: {train_time:.2f} seconds")
