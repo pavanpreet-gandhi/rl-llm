@@ -11,7 +11,7 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         self.gae_lambda = gae_lambda
 
     @PPODecorators.empty_device_cache()
-    def compute_gae(self, 
+    def compute_returns(self, 
                     queries: List[torch.LongTensor],
                     responses: List[torch.LongTensor], 
                     rewards: List[float], 
@@ -59,30 +59,22 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         for i in range(math.ceil(this_size / mini_batch_size)):
             input_kwargs = {key: value[i * mini_batch_size : (i + 1) * mini_batch_size] for key, value in model_inputs.items()}
             with torch.no_grad():
-                values = self.model(**input_kwargs)[2][:, 0].cpu().tolist()
+                values = self.model(**input_kwargs)[2][:, -1].cpu().tolist()
                 traj_values.extend(values)
         del traj_queries, traj_responses, model_inputs, values
         torch.cuda.empty_cache()
         self.model.train()
         
-        # Compute GAE advantages
-        advantages = []
-        last_advantage = 0
+        # Compute returns
+        Gs = []
+        last_G = 0
         next_value = 0 if dones[-1] else traj_values[-1] # Bootstrap if not terminal
         
         for t in reversed(range(len(rewards))):
-            delta = rewards[t] + self.gamma * next_value * (1 - dones[t]) - traj_values[t]
-            advantage = delta + self.gamma * self.gae_lambda * (1 - dones[t]) * last_advantage
-            advantages.append(advantage)
-            last_advantage = advantage
+            G = rewards[t] + self.gamma * (1.0 - self.gae_lambda) * next_value + self.gamma * self.gae_lambda * last_G
+            Gs.append(G)
+            last_G = G
             next_value = traj_values[t]
-        advantages.reverse()  # Reverse to get the correct order
+        Gs.reverse()  # Reverse to get the correct order
         
-        advantages = torch.tensor(advantages, dtype=torch.float32)
-    
-        # Normalize globally
-        norm_advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        
-        norm_advantages = norm_advantages.tolist()
-        
-        return norm_advantages
+        return Gs

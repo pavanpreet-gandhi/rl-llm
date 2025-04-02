@@ -130,8 +130,8 @@ def sample_batch(
                 total_count += 1
                 success_count += 1 if success else 0
                 success_rewards += reward if success else 0
-                # Compute TD(λ) targets
-                targets = trainer.compute_gae(
+                # Compute G_t targets
+                targets = trainer.compute_returns(
                     query_tensors_per_episode[i], 
                     response_tensors_per_episode[i], 
                     rewards_per_episode[i], 
