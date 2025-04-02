@@ -35,11 +35,12 @@ def sample_batch(
     # Initialize variables
     num_envs = len(env_managers)
     generate_times = []
+    append_exp_times = []
     success_count_by_task = {task: 0 for task in utils.task_types}
     total_count_by_task = {task: 0 for task in utils.task_types}
     success_reward_by_task = {task: 0 for task in utils.task_types}
     episode_length_by_task = {task: 0 for task in utils.task_types}
-    Q, R, W = [], [], [] # Query, Response, and Reward tensors
+    Q, R, W = [], [], []  # Query, Response, and Reward tensors
     query_tensors_per_episode = [[] for _ in range(num_envs)]
     response_tensors_per_episode = [[] for _ in range(num_envs)]
     rewards_per_episode = [[] for _ in range(num_envs)]
@@ -64,8 +65,10 @@ def sample_batch(
         query_tensors_step = []
         for context in contexts:
             if len(context) > (2 * context_window + 1):
-                context = context[0:1] + context[-(2*context_window)+1:]
-            query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
+                context = context[0:1] + context[-(2 * context_window) + 1 :]
+            query_tensor = tokenizer.apply_chat_template(
+                context, return_tensors="pt", add_generation_prompt=True
+            ).squeeze(0)
             query_tensors_step.append(query_tensor)
 
         response_tensors_step = trainer.generate(
@@ -78,8 +81,11 @@ def sample_batch(
         )
         generate_time = time.time() - start_time
         generate_times.append(generate_time)
-        
-        for i, (env, response_text) in enumerate(zip(env_managers, response_texts_step)):
+
+        start_time = time.time()
+        for i, (env, response_text) in enumerate(
+            zip(env_managers, response_texts_step)
+        ):
 
             query_tensors_per_episode[i].append(query_tensors_step[i])
             response_tensors_per_episode[i].append(response_tensors_step[i])
@@ -104,7 +110,7 @@ def sample_batch(
                 episode_length = len(rewards_per_episode[i])
                 episode_length_by_task[task] += episode_length
                 if success:
-                    for j in range(len(rewards_per_episode[i])-1):
+                    for j in range(len(rewards_per_episode[i]) - 1):
                         rewards_per_episode[i][j] += rewards_per_episode[i][-1]
                 # Append trajectory to Q, R, W
                 Q.extend(query_tensors_per_episode[i])
@@ -125,9 +131,11 @@ def sample_batch(
                         f"Environment {i} finished {task} with success: {success} in {episode_length} steps"
                     )
                     logger.info("-" * 20)
-                    if i==0:
+                    if i == 0:
                         logger.info(f"SYSTEM: {contexts[i][0]['content']}")
                         logger.info(f"USER: {contexts[i][1]['content']}")
+        append_exp_time = time.time() - start_time
+        append_exp_times.append(generate_time)
 
     # Convert rewards to tensors
     W = [torch.tensor(w, dtype=torch.float32) for w in W]
@@ -136,9 +144,14 @@ def sample_batch(
     total_count = sum(total_count_by_task.values())
     success_count = sum(success_count_by_task.values())
     success_rate = success_count / total_count if total_count > 0 else 0
-    avg_success_reward = sum(success_reward_by_task.values()) / success_count if success_count > 0 else 0
-    avg_episode_length = sum(episode_length_by_task.values()) / success_count if success_count > 0 else 0
+    avg_success_reward = (
+        sum(success_reward_by_task.values()) / success_count if success_count > 0 else 0
+    )
+    avg_episode_length = (
+        sum(episode_length_by_task.values()) / success_count if success_count > 0 else 0
+    )
     total_generate_time = sum(generate_times)
+    total_append_exp_time = sum(append_exp_times)
     min_generate_time = min(generate_times)
     max_generate_time = max(generate_times)
     stats = {
@@ -149,10 +162,32 @@ def sample_batch(
         "total_generate_time": total_generate_time,
         "min_generate_time": min_generate_time,
         "max_generate_time": max_generate_time,
+        "total_append_exp_time": total_append_exp_time,
     }
-    success_rate_by_task = {task: success_count_by_task[task] / total_count_by_task[task] if total_count_by_task[task] > 0 else 0 for task in utils.task_types}
-    avg_success_reward_by_task = {task: success_reward_by_task[task] / success_count_by_task[task] if success_count_by_task[task] > 0 else 0 for task in utils.task_types}
-    avg_episode_length_by_task = {task: episode_length_by_task[task] / success_count_by_task[task] if success_count_by_task[task] > 0 else 0 for task in utils.task_types}
+    success_rate_by_task = {
+        task: (
+            success_count_by_task[task] / total_count_by_task[task]
+            if total_count_by_task[task] > 0
+            else 0
+        )
+        for task in utils.task_types
+    }
+    avg_success_reward_by_task = {
+        task: (
+            success_reward_by_task[task] / success_count_by_task[task]
+            if success_count_by_task[task] > 0
+            else 0
+        )
+        for task in utils.task_types
+    }
+    avg_episode_length_by_task = {
+        task: (
+            episode_length_by_task[task] / success_count_by_task[task]
+            if success_count_by_task[task] > 0
+            else 0
+        )
+        for task in utils.task_types
+    }
     for task in utils.task_types:
         stats[f"total_count_{task}"] = total_count_by_task[task]
         stats[f"success_rate_{task}"] = success_rate_by_task[task]
@@ -189,7 +224,7 @@ if __name__ == "__main__":
     batch_size = 8
     env_managers = [
         EnvManager(
-            env_id, 
+            env_id,
             invalid_action_penalty=-2,
             consecutive_invalid_actions_allowed=5,
         )
@@ -208,4 +243,5 @@ if __name__ == "__main__":
     elapsed_time = time.time() - start_time
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
     from pprint import pprint
+
     pprint(f"Stats: {stats}")
