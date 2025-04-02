@@ -135,7 +135,7 @@ def sample_batch(
                         logger.info(f"SYSTEM: {contexts[i][0]['content']}")
                         logger.info(f"USER: {contexts[i][1]['content']}")
         append_exp_time = time.time() - start_time
-        append_exp_times.append(generate_time)
+        append_exp_times.append(append_exp_time)
 
     # Convert rewards to tensors
     W = [torch.tensor(w, dtype=torch.float32) for w in W]
