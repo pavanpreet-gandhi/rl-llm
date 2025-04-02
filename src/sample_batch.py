@@ -45,8 +45,8 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
-    env_ids = [env.env_id for env in envs]
 
+    # Main loop
     while len(rewards_all) < batch_size:
         
         # Time tokenization and generation
@@ -106,7 +106,6 @@ def sample_batch(
 
             if done:
                 # Collect stats
-                env_id = env_ids[i]
                 final_reward = reward
                 success = True if final_reward > 0 else False
                 episode_length = len(rewards_ep[i])
