@@ -51,7 +51,9 @@ def sample_batch(
         generation_kwargs: Dict[str, Any],
         batch_size: int,
         logger: logging.Logger = None,
-        context_window: int = 5 # Number of previous experiences to keep in 
+        context_window: int = 5, # Number of previous experiences to keep in 
+        gamma: float = 1,
+        lam: float = 0.95,
     ) -> Tuple[List[torch.Tensor], List[float], List[torch.Tensor]]:
     """"
     Sample a batch of experiences from the environment.
@@ -63,9 +65,8 @@ def sample_batch(
 
     # Initialize variables
     num_envs = len(env_managers)
-    successful_episode_count, total_episode_count, success_rewards, total_length = 0, 0, 0, 0
-    total_generate_time, total_generate_count = 0, 0
-    Q, R, W, D = [], [], [], [] # Query, Response, Reward and done tensors
+    success_count, total_count, success_rewards = 0, 0, 0
+    Q, R, W = [], [], [] # Query, Response, and Reward tensors
     query_tensors_per_episode = [[] for _ in range(num_envs)]
     response_tensors_per_episode = [[] for _ in range(num_envs)]
     rewards_per_episode = [[] for _ in range(num_envs)]
@@ -83,9 +84,9 @@ def sample_batch(
             logger.info(f"SYSTEM: {context[0]['content']}")
             logger.info(f"USER: {context[1]['content']}")
 
-    while total_length < batch_size:
+    while len(W) < batch_size:
         
-        start_time = time.time()
+        # Obtain query tensors for each environment
         query_tensors_step = []
         for context in contexts:
             query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
@@ -99,9 +100,6 @@ def sample_batch(
         )
         # Decode response tensors to text
         response_texts_step = tokenizer.batch_decode(response_tensors_step, skip_special_tokens=True)
-        generate_time = time.time() - start_time
-        total_generate_time += generate_time
-        total_generate_count += 1
         
         # Process each environment's response
         for i, (env, response_text) in enumerate(zip(env_managers, response_texts_step)):
@@ -113,7 +111,6 @@ def sample_batch(
             # Take step in the environment and save reward
             text_obs, reward, done = env.step(response_text)
             rewards_per_episode[i].append(reward)
-            dones_per_episode[i].append(done)
 
             # Update context with the new obs from the environment
             contexts[i].append({"role": "assistant", "content": response_text})
@@ -130,42 +127,45 @@ def sample_batch(
             if done:
                 # Track success
                 success = True if reward > 0 else False
-                total_episode_count += 1
-                successful_episode_count += 1 if success else 0
+                total_count += 1
+                success_count += 1 if success else 0
                 success_rewards += reward if success else 0
-                episode_length = len(rewards_per_episode[i])
-                total_length += episode_length
+                # Compute TD(λ) targets
+                targets = trainer.compute_gae(
+                    query_tensors_per_episode[i], 
+                    response_tensors_per_episode[i], 
+                    rewards_per_episode[i], 
+                    dones_per_episode[i])
                 # Append trajectory to Q, R, W
-                Q.append(query_tensors_per_episode[i])
-                R.append(response_tensors_per_episode[i])
-                W.append(rewards_per_episode[i])
-                D.append(dones_per_episode[i])
+                Q.extend(query_tensors_per_episode[i])
+                R.extend(response_tensors_per_episode[i])
+                W.extend(targets)
                 # Reset env and contexts
                 query_tensors_per_episode[i] = []
                 response_tensors_per_episode[i] = []
                 rewards_per_episode[i] = []
-                dones_per_episode[i] = []
                 mission, text_obs = env.reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": text_obs}]
                 if logger is not None:
-                    logger.info(f"Environment {i} finished with success: {success} in {episode_length} steps")
+                    logger.info(f"Environment {i} finished with success: {success}, resetting...")
                     logger.info("-"*20)
                     logger.info(f"SYSTEM: {contexts[i][0]['content']}")
                     logger.info(f"USER: {contexts[i][1]['content']}")
     
+    # Convert rewards to tensors
+    W = [torch.tensor(w, dtype=torch.float32) for w in W]
+    
     # Compute stats
-    success_rate = successful_episode_count / total_episode_count if total_episode_count > 0 else 0
-    avg_success_reward = success_rewards / successful_episode_count if successful_episode_count > 0 else 0
-    avg_generate_time = total_generate_time / total_generate_count if total_generate_count > 0 else 0
+    success_rate = success_count / total_count if total_count > 0 else 0
+    avg_success_reward = success_rewards / success_count if success_count > 0 else 0
     stats = {
         "success_rate": success_rate,
-        "total_count": total_episode_count,
-        "success_count": successful_episode_count,
+        "total_count": total_count,
+        "success_count": success_count,
         "avg_success_reward": avg_success_reward,
-        "avg_generate_time": avg_generate_time,
     }
-    return Q, R, W, D, stats
+    return Q, R, W, stats
 
 
 if __name__=="__main__":
