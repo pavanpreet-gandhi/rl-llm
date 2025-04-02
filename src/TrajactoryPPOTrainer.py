@@ -10,7 +10,7 @@ def log_memory(logger, point):
                 f"Max: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
 
 class BatchedTrajectoryPPOTrainer(PPOTrainer):
-    def __init__(self, config: PPOConfig, model, ref_model, tokenizer, gamma=0.9, gae_lambda=0.95):
+    def __init__(self, config: PPOConfig = None, model = None, ref_model = None, tokenizer = None, gamma=0.9, gae_lambda=0.95):
         super().__init__(config, model, ref_model, tokenizer)
         self.gamma = gamma
         self.gae_lambda = gae_lambda

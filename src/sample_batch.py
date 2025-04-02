@@ -52,9 +52,7 @@ def sample_batch(
         generation_kwargs: Dict[str, Any],
         batch_size: int,
         logger: logging.Logger = None,
-        context_window: int = 5, # Number of previous experiences to keep in 
-        gamma: float = 1,
-        lam: float = 0.95,
+        context_window: int = 5 # Number of previous experiences to keep in 
     ) -> Tuple[List[torch.Tensor], List[float], List[torch.Tensor]]:
     """"
     Sample a batch of experiences from the environment.
