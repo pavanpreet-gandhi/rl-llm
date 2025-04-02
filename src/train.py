@@ -32,30 +32,30 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-ppo-experiments",  # TODO: "babyai-ppo-experiments"
+        "project_name": "delete-me",  # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "entity": "OE_2025",
-        "push_to_hub": True,  # TODO: True
-        "hub_model_id": None,  # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
+        "push_to_hub": False, # TODO: True
+        "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
-        "save_every": 25,  # TODO: 25
+        "save_every": 10,  # TODO: 10
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
         "pretrained_dir": "", # add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": False,
         # Training config
-        "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
-        "env_id": "BabyAI-MixedTrainLocal-v0",  # TODO: "BabyAI-MixedTrainLocal-v0"
+        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct", # "meta-llama/Llama-3.2-3B-Instruct",  # 
         "num_shared_layers": None,
         "num_steps_train": 10_000,
         "num_envs": 4,  # TODO: 4
         # PPO config
-        "batch_size": 128,  # TODO: 128
-        "mini_batch_size": 16,  # TODO: 64
+        "batch_size": 4,  # TODO: 128
+        "mini_batch_size": 4,  # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
         # Env config
+        "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 2,  # Number of previous experiences to keep in context
@@ -87,17 +87,16 @@ def setup_training(args, logger: logging.Logger):
     logger.info(f"Using device: {device}")
 
     # Set up environment managers
-    # breakpoint()
-    env_managers = [
+    envs = [
         EnvManager(
-            env_id=args.env_id,
+            env_ids=args.env_ids,
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
             reasoning_flag=args.reasoning_flag,
         )
         for i in range(args.num_envs)
     ]
-    logger.info(f"Created environment: {args.env_id}")
+    logger.info(f"Created environments: {args.env_ids}")
 
     # Create checkpoints directory if it doesn't exist
     checkpoint_dir = os.path.join(args.checkpoint_dir, args.experiment_name)
@@ -184,7 +183,7 @@ def setup_training(args, logger: logging.Logger):
             logger.info(f"Continuing without pushing to hub")
             args.push_to_hub = False
 
-    return env_managers, trainer, tokenizer, generation_kwargs, device, checkpoint_dir
+    return envs, trainer, tokenizer, generation_kwargs, device, checkpoint_dir
 
 
 def train(args, logger: logging.Logger):
@@ -204,7 +203,7 @@ def train(args, logger: logging.Logger):
         "context_window": args.context_window,
         "max_new_tokens": args.max_new_tokens,
         "model_id": args.model_id,
-        "env_id": args.env_id,
+        "env_ids": args.env_ids,
         "num_envs": args.num_envs,
     })
     logger.info("Logged key arguments to wandb")
@@ -215,13 +214,13 @@ def train(args, logger: logging.Logger):
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
         start_time = datetime.now()
-        query_tensors, response_tensors, rewards, metrics = sample_batch(
-            env_managers,
-            tokenizer,
-            trainer,
-            generation_kwargs,
+        queries, responses, rewards, stats = sample_batch(
+            envs=env_managers,
+            tokenizer=tokenizer,
+            model=trainer.model,
+            generation_kwargs=generation_kwargs,
+            device=device,
             batch_size=args.batch_size,
-            logger=logger,
             context_window=args.context_window,
             reasoning_flag=args.reasoning_flag,
         )
@@ -229,33 +228,30 @@ def train(args, logger: logging.Logger):
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
 
         # Log sampling stats to wandb
-        metrics["sample_time"] = sample_time
-        metrics["sampled_batch_size"] = len(rewards)
+        stats["sample_time"] = sample_time
+        stats["sampled_batch_size"] = len(rewards)
 
         # Select random subset of experiences (since sample_trajectories could return more than needed)
         indices = torch.randperm(len(rewards))[: args.batch_size].tolist()
-        query_tensors = [query_tensors[i] for i in indices]
-        response_tensors = [response_tensors[i] for i in indices]
+        queries = [queries[i] for i in indices]
+        responses = [responses[i] for i in indices]
         rewards = [rewards[i] for i in indices]
 
         # Train step
         start_time = datetime.now()
-        stats = trainer.step(query_tensors, response_tensors, rewards)
+        trainer_stats = trainer.step(queries, responses, rewards)
         train_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Trainer step time: {train_time:.2f} seconds")
 
         # Add timing stats to wandb
-        metrics.update(
-            {
-                "trainer_step_time": train_time,
-                "total_time": sample_time + train_time,
-            }
-        )
-        wandb.log(metrics, step=step)
+        stats.update(trainer_stats)
+        stats["train_step_time"] = train_time
+        stats["total_time"] = sample_time + train_time
         logger.info(f"TRAINING STEP {step} COMPLETED")
+
         # Log trainer stats
-        query = tokenizer.batch_decode(query_tensors, skip_special_tokens=True)
-        response = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
+        query = tokenizer.batch_decode(queries, skip_special_tokens=True)
+        response = tokenizer.batch_decode(responses, skip_special_tokens=True)
         batch = {"query": query, "response": response}
         trainer.log_stats(stats, batch, rewards)
 

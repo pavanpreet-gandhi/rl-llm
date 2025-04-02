@@ -1,181 +1,149 @@
 import utils
-from env_manager import EnvManager
+from src import EnvManager
+from typing import List, Union, Dict, Any
+import time
+import logging
 import gym, babyai_text
 import torch
-from transformers import PreTrainedTokenizer, AutoTokenizer
-from trl import (
-    PPOConfig,
-    PPOTrainer,
-    AutoModelForCausalLMWithValueHead,
-    create_reference_model,
-)
-from typing import Dict, List, Any, Tuple
-import logging
-import time
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from trl import AutoModelForCausalLMWithValueHead
 
 
 def sample_batch(
-    env_managers: List[EnvManager],
-    tokenizer: PreTrainedTokenizer,
-    trainer: PPOTrainer,
-    generation_kwargs: Dict[str, Any],
-    batch_size: int,
-    logger: logging.Logger = None,
-    context_window: int = 5,  # Number of previous experiences to keep in context
-    reasoning_flag: bool = False,
-) -> Tuple[List[torch.Tensor], List[float], List[torch.Tensor]]:
+        envs: List[EnvManager],
+        tokenizer: AutoTokenizer,
+        model: Union[AutoModelForCausalLM, AutoModelForCausalLMWithValueHead],
+        generation_kwargs: Dict[str, Any],
+        device: torch.device,
+        batch_size: int,
+        logger: logging.Logger = None,
+        context_window: int = 5, 
+        reasoning_flag: bool = False,
+):
     """
-    Sample a batch of experiences from the environment.
+    Sample a batch of experiences using the model from the given environments.
     """
-    # If logger is None create a temporary logger
-    if logger is None:
-        logger = logging.getLogger("sample_batch")
-        logger.setLevel(logging.INFO)
-
-    # Initialize variables
-    num_envs = len(env_managers)
-    generate_times = []
-    success_count_by_task = {task: 0 for task in utils.task_types}
-    total_count_by_task = {task: 0 for task in utils.task_types}
-    success_reward_by_task = {task: 0 for task in utils.task_types}
-    episode_length_by_task = {task: 0 for task in utils.task_types}
-    Q, R, W = [], [], [] # Query, Response, and Reward tensors
-    query_tensors_per_episode = [[] for _ in range(num_envs)]
-    response_tensors_per_episode = [[] for _ in range(num_envs)]
-    rewards_per_episode = [[] for _ in range(num_envs)]
-
-    # Reset envs and initialize contexts
-    contexts = [[] for _ in range(num_envs)]
+    # Setup
+    num_envs = len(envs)
     system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
-    missions, text_obss = zip(*[env.reset() for env in env_managers])
-    for i, (context, mission, text_obs) in enumerate(
-        zip(contexts, missions, text_obss)
-    ):
-        system_prompt = system_prompt_template.replace("{goal}", mission)
-        context.append({"role": "system", "content": system_prompt})
-        context.append({"role": "user", "content": text_obs})
-        if i == 0 and logger is not None:
-            logger.info(f"SYSTEM: {context[0]['content']}")
-            logger.info(f"USER: {context[1]['content']}")
 
-    while len(W) < batch_size:
+    # Initialize global storage lists
+    queries_all, responses_all, rewards_all = [], [], []
 
+    # Initialize per-environment storage lists
+    queries_ep = [[] for _ in range(num_envs)]
+    responses_ep = [[] for _ in range(num_envs)]
+    rewards_ep = [[] for _ in range(num_envs)]
+
+    # Reset envs and contexts
+    contexts = [[] for _ in range(num_envs)] # each env has its own context represented as a list of system, user, and assistant messages
+    missions, obss = zip(*[env.reset() for env in envs]) # reset all environments
+    for i in range(num_envs):
+        system_prompt = system_prompt_template.replace("{goal}", missions[i])
+        contexts[i].append({"role": "system", "content": system_prompt})
+        contexts[i].append({"role": "user", "content": obss[i]})
+
+    # Variables to keep track of stats
+    total_generate_time = 0
+    env_ids = [env.env_id for env in envs]
+
+    while len(rewards_all) < batch_size:
+        
+        # Time tokenization and generation
         start_time = time.time()
-        query_tensors_step = []
+
+        # Clip contexts to the last context_window observations (keep the first system message)
+        clipped_contexts = []
         for context in contexts:
             if len(context) > (2 * context_window + 1):
-                context = context[0:1] + context[-(2*context_window)+1:]
-            query_tensor = tokenizer.apply_chat_template(context, return_tensors="pt", add_generation_prompt=True).squeeze(0)
-            query_tensors_step.append(query_tensor)
+                clipped_context = [context[0]] + context[-(2*context_window)+1:]
+            else:
+                clipped_context = context
+            clipped_contexts.append(clipped_context)
 
-        response_tensors_step = trainer.generate(
-            query_tensors_step,
-            generation_kwargs=generation_kwargs,
-            return_prompt=False,
+        # Create queries
+        queries = tokenizer.apply_chat_template(
+            clipped_contexts, 
+            padding=True,
+            return_tensors="pt", 
+            add_generation_prompt=True
+        ).to(device)
+        attention_mask = (queries != tokenizer.pad_token_id).long()
+
+        # Generate responses
+        output = model.generate(
+            queries,
+            attention_mask=attention_mask,
+            **generation_kwargs,
         )
-        response_texts_step = tokenizer.batch_decode(
-            response_tensors_step, skip_special_tokens=True
+        responses = output[:, queries.shape[-1]:]
+
+        # Extract actions
+        actions = tokenizer.batch_decode(
+            responses,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
         )
-        generate_time = time.time() - start_time
-        generate_times.append(generate_time)
+
+        # Time tokenization and generation
+        end_time = time.time()
+        generation_time = end_time - start_time
+        total_generate_time += generation_time
         
-        for i, (env, response_text) in enumerate(zip(env_managers, response_texts_step)):
+        # Process each action sequentially
+        for i in range(num_envs):
+            # Store query and response
+            queries_ep[i].append(queries[i])
+            responses_ep[i].append(responses[i])
 
-            query_tensors_per_episode[i].append(query_tensors_step[i])
-            response_tensors_per_episode[i].append(response_tensors_step[i])
+            # Take step in the environment
+            text_obs, reward, done = envs[i].step(actions[i])
+            rewards_ep[i].append(reward)
 
-            text_obs, reward, done = env.step(response_text)
-            rewards_per_episode[i].append(reward)
-            contexts[i].append({"role": "assistant", "content": response_text})
+            # Update context
+            contexts[i].append({"role": "assistant", "content": actions[i]})
             contexts[i].append({"role": "user", "content": text_obs})
 
-            if i == 0 and logger is not None:
-                logger.info(f"ASSISTANT: {response_text}")
-                logger.info(f"USER: {text_obs}")
-                logger.info(f"REWARD: {reward} DONE: {done}")
-
             if done:
-                # Discount future rewards if successful
-                task = env.get_task()
-                success = True if reward > 0 else False
-                total_count_by_task[task] += 1
-                success_count_by_task[task] += 1 if success else 0
-                success_reward_by_task[task] += reward if success else 0
-                episode_length = len(rewards_per_episode[i])
-                episode_length_by_task[task] += episode_length
+                # Collect stats
+                env_id = env_ids[i]
+                final_reward = reward
+                success = True if final_reward > 0 else False
+                episode_length = len(rewards_ep[i])
+                
+                # Discount rewards if successful
                 if success:
-                    for j in range(len(rewards_per_episode[i])-1):
-                        rewards_per_episode[i][j] += rewards_per_episode[i][-1]
-                # Append trajectory to Q, R, W
-                Q.extend(query_tensors_per_episode[i])
-                R.extend(response_tensors_per_episode[i])
-                W.extend(rewards_per_episode[i])
-                # Reset env and contexts
-                query_tensors_per_episode[i] = []
-                response_tensors_per_episode[i] = []
-                rewards_per_episode[i] = []
-                mission, text_obs = env.reset()
+                    for j in range(len(rewards_ep[i]) - 1):
+                        rewards_ep[i][j] = final_reward # add final reward to all previous rewards
+                
+                # Append to global storage
+                queries_all.extend(queries_ep[i])
+                responses_all.extend(responses_ep[i])
+                rewards_all.extend(rewards_ep[i])
+
+                # Reset environment, context, and per-environment storage
+                queries_ep[i], responses_ep[i], rewards_ep[i], contexts[i] = [], [], [], []
+                mission, text_obs = envs[i].reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
-                contexts[i] = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text_obs},
-                ]
-                if logger is not None:
-                    logger.info(
-                        f"Environment {i} finished {task} with success: {success} in {episode_length} steps"
-                    )
-                    logger.info("-" * 20)
-                    if i==0:
-                        logger.info(f"SYSTEM: {contexts[i][0]['content']}")
-                        logger.info(f"USER: {contexts[i][1]['content']}")
+                contexts[i].append({"role": "system", "content": system_prompt})
+                contexts[i].append({"role": "user", "content": text_obs})
+    
+    # Convert rewards to individual tensors
+    rewards_all = [torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all]
 
-    # Convert rewards to tensors
-    W = [torch.tensor(w, dtype=torch.float32) for w in W]
-
-    # Compute stats
-    total_count = sum(total_count_by_task.values())
-    success_count = sum(success_count_by_task.values())
-    success_rate = success_count / total_count if total_count > 0 else 0
-    avg_success_reward = sum(success_reward_by_task.values()) / success_count if success_count > 0 else 0
-    avg_episode_length = sum(episode_length_by_task.values()) / success_count if success_count > 0 else 0
-    total_generate_time = sum(generate_times)
-    min_generate_time = min(generate_times)
-    max_generate_time = max(generate_times)
+    # Package stats
     stats = {
-        "total_count": total_count,
-        "success_rate": success_rate,
-        "avg_success_reward": avg_success_reward,
-        "avg_episode_length": avg_episode_length,
         "total_generate_time": total_generate_time,
-        "min_generate_time": min_generate_time,
-        "max_generate_time": max_generate_time,
     }
-    success_rate_by_task = {task: success_count_by_task[task] / total_count_by_task[task] if total_count_by_task[task] > 0 else 0 for task in utils.task_types}
-    avg_success_reward_by_task = {task: success_reward_by_task[task] / success_count_by_task[task] if success_count_by_task[task] > 0 else 0 for task in utils.task_types}
-    avg_episode_length_by_task = {task: episode_length_by_task[task] / success_count_by_task[task] if success_count_by_task[task] > 0 else 0 for task in utils.task_types}
-    for task in utils.task_types:
-        stats[f"total_count_{task}"] = total_count_by_task[task]
-        stats[f"success_rate_{task}"] = success_rate_by_task[task]
-        stats[f"avg_success_reward_{task}"] = avg_success_reward_by_task[task]
-        stats[f"avg_episode_length_{task}"] = avg_episode_length_by_task[task]
 
-    return Q, R, W, stats
+    return queries_all, responses_all, rewards_all, stats
 
 
 if __name__ == "__main__":
-    import time
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    config = PPOConfig(batch_size=4, mini_batch_size=4)
-    model_id = (
-        "HuggingFaceTB/SmolLM2-135M-Instruct"  # "meta-llama/Llama-3.2-3B-Instruct"
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLMWithValueHead.from_pretrained(model_id)
-    ref_model = create_reference_model(model)
-    trainer = PPOTrainer(config, model, ref_model, tokenizer)
+    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct" # "meta-llama/Llama-3.2-3B-Instruct"
+    model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     generation_kwargs = {
         "max_new_tokens": 20,
         "do_sample": True,
@@ -183,13 +151,13 @@ if __name__ == "__main__":
         "top_p": 0.95,
         "temperature": 0.8,
     }
-    env_id = "BabyAI-MixedTrainLocal-v0"
+    env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"]
     context_window = 3
     num_envs = 1
     batch_size = 8
     env_managers = [
         EnvManager(
-            env_id, 
+            env_ids, 
             invalid_action_penalty=-2,
             consecutive_invalid_actions_allowed=5,
         )
@@ -197,13 +165,15 @@ if __name__ == "__main__":
     ]
 
     start_time = time.time()
-    Q, R, W, stats = sample_batch(
-        env_managers,
-        tokenizer,
-        trainer,
-        generation_kwargs,
-        batch_size,
+    queries, responses, rewards, stats = sample_batch(
+        envs=env_managers,
+        tokenizer=AutoTokenizer.from_pretrained(model_id),
+        model=model,
+        generation_kwargs=generation_kwargs,
+        device=device,
+        batch_size=batch_size,
         context_window=context_window,
+        reasoning_flag=False,
     )
     elapsed_time = time.time() - start_time
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
