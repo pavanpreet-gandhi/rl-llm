@@ -26,7 +26,6 @@ class EnvManager:
         return self.task
     
     def step(self, text_action: str) -> Tuple[str, float, bool]:
-        # breakpoint()
         if self.reasoning_flag:
             text_action = text_action.split("final answer:")[-1].strip()
             action = utils.text_to_action.get(text_action, None)
