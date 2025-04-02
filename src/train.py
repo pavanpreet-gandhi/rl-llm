@@ -229,17 +229,25 @@ def train(args, logger: logging.Logger):
 
     # Create logger for training
     train_logger = logging.getLogger("train_logger")
+    train_logger.setLevel(logging.INFO)
+    # Remove any existing handlers to avoid duplicate logging
     # Create a file handler to write logs to a file
-    log_file = "training_logs.txt"
-    file_handler = logging.FileHandler(log_file)
+    train_log_file = "logs/training_logs.txt"
+    file_handler = logging.FileHandler(train_log_file)
     file_handler.setLevel(logging.INFO)
 
     # Create a formatter and add it to the handler
     formatter = logging.Formatter("%(asctime)s - %(message)s")
     file_handler.setFormatter(formatter)
+    train_logger.handlers = []  # Clear existing handlers
+    # Add only the file handler
+    train_logger.addHandler(file_handler)
+    # Ensure logs are not printed to the console
+    train_logger.propagate = False
 
     # Add the handler to the logger
     train_logger.addHandler(file_handler)
+    wandb.save(train_log_file)
 
     for step in tqdm(range(args.num_steps_train)):
         train_logger.info(f"TRAINING STEP {step + 1} STARTED")
@@ -289,6 +297,10 @@ def train(args, logger: logging.Logger):
         batch = {"query": query, "response": response}
         trainer.log_stats(stats, batch, rewards)
 
+        # Upload the training log file to wandb
+        train_logger.info("Uploaded training_logs.txt to wandb")
+        wandb.save("training_logs.txt")
+
         # Save checkpoint if needed
         if args.save_every > 0 and (step + 1) % args.save_every == 0:
             checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint-{step + 1}")
@@ -319,11 +331,7 @@ def train(args, logger: logging.Logger):
                 except Exception as e:
                     logger.error(f"Failed to push to hub: {e}")
                     logger.info("Continuing with training")
-    # Upload the training log file to wandb
-    artifact = wandb.Artifact("training_logs", type="log")
-    artifact.add_file("training_logs.txt")
-    wandb.log_artifact(artifact)
-    train_logger.info("Uploaded training_logs.txt to wandb")
+
 
 
 if __name__ == "__main__":

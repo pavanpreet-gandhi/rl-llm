@@ -23,6 +23,8 @@ def sample_batch(
     """
     Sample a batch of experiences using the model from the given environments.
     """
+    if logger is None:
+        print("train logger is None")
     # Setup
     num_envs = len(envs)
     system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
@@ -34,6 +36,11 @@ def sample_batch(
     queries_ep = [[] for _ in range(num_envs)]
     responses_ep = [[] for _ in range(num_envs)]
     rewards_ep = [[] for _ in range(num_envs)]
+
+    # For train logger logging purposes
+    txt_queries_ep = [[] for _ in range(num_envs)]
+    txt_actions_ep = [[] for _ in range(num_envs)]
+
 
     # Reset envs and contexts
     contexts = [[] for _ in range(num_envs)] # each env has its own context represented as a list of system, user, and assistant messages
@@ -89,12 +96,15 @@ def sample_batch(
         end_time = time.time()
         generation_time = end_time - start_time
         total_generate_time += generation_time
-        
+        # breakpoint()
         # Process each action sequentially
         for i in range(num_envs):
             # Store query and response
             queries_ep[i].append(queries[i])
             responses_ep[i].append(responses[i])
+
+            txt_actions_ep[i].append(actions[i].strip())
+            txt_queries_ep[i].append(tokenizer.decode(queries[i], skip_special_tokens=True).strip())
 
             # Take step in the environment
             text_obs, reward, done = envs[i].step(actions[i])
@@ -119,6 +129,8 @@ def sample_batch(
                 queries_all.extend(queries_ep[i])
                 responses_all.extend(responses_ep[i])
                 rewards_all.extend(rewards_ep[i])
+                # Log query, response, and reward
+                logger.info(f"Env {i}: Query: {txt_queries_ep[i]}, Response: {txt_actions_ep[i]}, Reward: {rewards_ep[i]}")
 
                 # Reset environment, context, and per-environment storage
                 queries_ep[i], responses_ep[i], rewards_ep[i], contexts[i] = [], [], [], []
