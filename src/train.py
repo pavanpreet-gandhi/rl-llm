@@ -25,6 +25,7 @@ import utils
 from env_manager import EnvManager
 from sample_batch import sample_batch
 from custom_value_head import CustomValueHead
+from TrajactoryPPOTrainer import BatchedTrajectoryPPOTrainer, log_memory
 
 
 def parse_args() -> Dict[str, Any]:
@@ -75,6 +76,10 @@ def parse_args() -> Dict[str, Any]:
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
+        # RL config
+        "trajactory_rl": True,
+        "gamma": 0.9,
+        "lam": 0.95,
     }
     args = SimpleNamespace(**args)  # same type as argparse would return
     return args
@@ -164,7 +169,7 @@ def setup_training(args, logger: logging.Logger):
         exp_name=args.experiment_name,
         log_with="wandb",
     )
-    trainer = PPOTrainer(config, model, ref_model, tokenizer)
+    trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lam)
     logger.info("Initialized PPO Trainer")
 
     # Set up generation kwargs for sampling trajectories
@@ -230,12 +235,13 @@ def train(args, logger: logging.Logger):
         queries, responses, rewards, stats = sample_batch(
             envs=env_managers,
             tokenizer=tokenizer,
-            model=trainer.model,
+            trainer=trainer,
             generation_kwargs=generation_kwargs,
             device=device,
             batch_size=args.batch_size,
             context_window=args.context_window,
             reasoning_flag=args.reasoning_flag,
+            trajectory_rl=args.trajactory_rl
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
@@ -251,9 +257,11 @@ def train(args, logger: logging.Logger):
         rewards = [rewards[i] for i in indices]
 
         # Train step
+        log_memory(logger, "Before trainer step")
         start_time = datetime.now()
         trainer_stats = trainer.step(queries, responses, rewards)
         train_time = (datetime.now() - start_time).total_seconds()
+        log_memory(logger, "After trainer step")
         logger.info(f"Trainer step time: {train_time:.2f} seconds")
 
         # Add timing stats to wandb

@@ -7,18 +7,21 @@ import gym, babyai_text
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import AutoModelForCausalLMWithValueHead
+from TrajactoryPPOTrainer import log_memory, BatchedTrajectoryPPOTrainer
+from trl import PPOTrainer, PPOConfig
 
 
 def sample_batch(
         envs: List[EnvManager],
         tokenizer: AutoTokenizer,
-        model: Union[AutoModelForCausalLM, AutoModelForCausalLMWithValueHead],
+        trainer: PPOTrainer,
         generation_kwargs: Dict[str, Any],
         device: torch.device,
         batch_size: int,
         logger: logging.Logger = None,
         context_window: int = 5, 
         reasoning_flag: bool = False,
+        trajectory_rl: bool = False,
 ):
     """
     Sample a batch of experiences using the model from the given environments.
@@ -34,6 +37,7 @@ def sample_batch(
     queries_ep = [[] for _ in range(num_envs)]
     responses_ep = [[] for _ in range(num_envs)]
     rewards_ep = [[] for _ in range(num_envs)]
+    dones_ep = [[] for _ in range(num_envs)]
 
     # Reset envs and contexts
     contexts = [[] for _ in range(num_envs)] # each env has its own context represented as a list of system, user, and assistant messages
@@ -71,7 +75,7 @@ def sample_batch(
         attention_mask = (queries != tokenizer.pad_token_id).long()
 
         # Generate responses
-        output = model.generate(
+        output = trainer.model.generate(
             queries,
             attention_mask=attention_mask,
             **generation_kwargs,
@@ -99,6 +103,7 @@ def sample_batch(
             # Take step in the environment
             text_obs, reward, done = envs[i].step(actions[i])
             rewards_ep[i].append(reward)
+            dones_ep[i].append(done)
 
             # Update context
             contexts[i].append({"role": "assistant", "content": actions[i]})
@@ -110,19 +115,28 @@ def sample_batch(
                 success = True if final_reward > 0 else False
                 episode_length = len(rewards_ep[i])
                 
-                # Discount rewards if successful
-                if success:
-                    for j in range(len(rewards_ep[i]) - 1):
-                        rewards_ep[i][j] = final_reward # add final reward to all previous rewards
+                if trajectory_rl and isinstance(trainer, BatchedTrajectoryPPOTrainer):
+                    targets = trainer.compute_returns(
+                        queries=queries_ep[i],
+                        responses=responses_ep[i],
+                        rewards=rewards_ep[i],
+                        dones=dones_ep[i]
+                    )
+                    rewards_all.extend(targets)
+                else:
+                    # Discount rewards if successful
+                    if success:
+                        for j in range(len(rewards_ep[i]) - 1):
+                            rewards_ep[i][j] = final_reward # add final reward to all previous rewards
+                    rewards_all.extend(rewards_ep[i])
                 
                 # Append to global storage
                 queries_all.extend(queries_ep[i])
                 responses_all.extend(responses_ep[i])
-                rewards_all.extend(rewards_ep[i])
 
                 # Reset environment, context, and per-environment storage
-                queries_ep[i], responses_ep[i], rewards_ep[i], contexts[i] = [], [], [], []
-                mission, text_obs = envs[i].reset()
+                queries_ep[i], responses_ep[i], rewards_ep[i], dones_ep[i], contexts[i] = [], [], [], [], []
+                mission, text_obs = envs[i].reset() 
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i].append({"role": "system", "content": system_prompt})
                 contexts[i].append({"role": "user", "content": text_obs})
@@ -143,6 +157,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_id = "HuggingFaceTB/SmolLM2-135M-Instruct" # "meta-llama/Llama-3.2-3B-Instruct"
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
+    trainer = BatchedTrajectoryPPOTrainer(model=model)
     generation_kwargs = {
         "max_new_tokens": 20,
         "do_sample": True,
@@ -167,12 +182,13 @@ if __name__ == "__main__":
     queries, responses, rewards, stats = sample_batch(
         envs=env_managers,
         tokenizer=AutoTokenizer.from_pretrained(model_id),
-        model=model,
+        trainer=trainer,
         generation_kwargs=generation_kwargs,
         device=device,
         batch_size=batch_size,
         context_window=context_window,
         reasoning_flag=False,
+        trajectory_rl=False
     )
     elapsed_time = time.time() - start_time
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
