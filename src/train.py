@@ -42,7 +42,7 @@ def parse_args() -> Dict[str, Any]:
         "save_every": 25,  # TODO: 25
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "",  # add path for the pretrained model "your-hf-username/your-model-repo"
+        "pretrained_dir": "Heisenger/babyai-ppo-experiments-2025-04-02_16-47-48",  # add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": False,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
@@ -133,7 +133,7 @@ def setup_training(args, logger: logging.Logger):
         value_head_path = hf_hub_download(
             repo_id=pretrained_dir, filename="value_head.bin"
         )
-        model.v_head.load_state_dict(torch.load(value_head_path))
+        model.v_head.load_state_dict(torch.load(value_head_path))#.to(device).to(dtype=torch.bfloat16)
 
         logger.info(f"Loaded model and tokenizer from {pretrained_dir}")
 
@@ -145,7 +145,7 @@ def setup_training(args, logger: logging.Logger):
             args.model_id, peft_config=peft_config, torch_dtype=torch.bfloat16
         ).to(device)
         hidden_size = model.config.hidden_size
-        model.v_head = CustomValueHead(hidden_size).to(device)
+        model.v_head = CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
         logger.info("Loaded model and tokenizer from scratch")
 
     # Create reference model
