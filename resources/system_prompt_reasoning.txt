@@ -1,0 +1,12 @@
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. 
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
