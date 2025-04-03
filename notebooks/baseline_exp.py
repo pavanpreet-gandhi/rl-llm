@@ -15,7 +15,7 @@ CONTEXT_WINDOWS = [1, 2, 3, 4, 5]
 NUM_ENVS = 4
 NUM_BATCHES = 5
 BATCH_SIZE = 128
-REASONING_FLAG = False
+REASONING_FLAG = True
 os.makedirs(PLOTS_DIR, exist_ok=True)
 from transformers import logging
 logging.set_verbosity_error()
