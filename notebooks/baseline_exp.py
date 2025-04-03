@@ -9,11 +9,11 @@ from src import EnvManager, sample_batch
 # =================== CONFIG ===================
 PLOTS_DIR = "outputs/plots"
 TABLE_PATH = "outputs/results_summary.csv"
-MODEL_IDS = ["Qwen/Qwen2-7B-Instruct"]
+MODEL_IDS = ["Qwen/Qwen2-1.5B-Instruct"]
 ENV_IDS = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0", "BabyAI-Open-v0"]
 CONTEXT_WINDOWS = [1, 2, 3, 4, 5]
 NUM_ENVS = 4
-NUM_BATCHES = 5
+NUM_BATCHES = 3
 BATCH_SIZE = 128
 REASONING_FLAG = True
 os.makedirs(PLOTS_DIR, exist_ok=True)
