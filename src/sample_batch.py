@@ -45,6 +45,11 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
+    possible_env_ids = envs[0].env_ids # assuming all envs have the same env_ids
+    success_by_env_id = {env_id: [] for env_id in possible_env_ids}
+    rewards_by_env_id = {env_id: [] for env_id in possible_env_ids}
+    episode_lengths_by_env_id = {env_id: [] for env_id in possible_env_ids}
+    num_invalid_actions_by_env_id = {env_id: [] for env_id in possible_env_ids}
 
     # Main loop
     while len(rewards_all) < batch_size:
@@ -109,6 +114,14 @@ def sample_batch(
                 final_reward = reward
                 success = True if final_reward > 0 else False
                 episode_length = len(rewards_ep[i])
+                num_invalid_actions = sum([r < 0 for r in rewards_ep[i]])
+
+                # Store stats
+                env_id = envs[i].env_id
+                success_by_env_id[env_id].append(1 if success else 0)
+                rewards_by_env_id[env_id].append(final_reward if success else 0)
+                episode_lengths_by_env_id[env_id].append(episode_length)
+                num_invalid_actions_by_env_id[env_id].append(num_invalid_actions)
                 
                 # Discount rewards if successful
                 if success:
@@ -130,12 +143,20 @@ def sample_batch(
     # Convert rewards to individual tensors
     rewards_all = [torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all]
 
+    # By env and episode stats
+    running_stats = {
+        "success": success_by_env_id,
+        "rewards": rewards_by_env_id,
+        "episode_lengths": episode_lengths_by_env_id,
+        "num_invalid_actions": num_invalid_actions_by_env_id,
+    }
+
     # Package stats
     stats = {
         "total_generate_time": total_generate_time,
     }
 
-    return queries_all, responses_all, rewards_all, stats
+    return queries_all, responses_all, rewards_all, stats, running_stats
 
 
 if __name__ == "__main__":
@@ -164,7 +185,7 @@ if __name__ == "__main__":
     ]
 
     start_time = time.time()
-    queries, responses, rewards, stats = sample_batch(
+    queries, responses, rewards, stats, running_stats = sample_batch(
         envs=env_managers,
         tokenizer=AutoTokenizer.from_pretrained(model_id),
         model=model,
@@ -178,3 +199,4 @@ if __name__ == "__main__":
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
     from pprint import pprint
     pprint(f"Stats: {stats}")
+    pprint(f"Running stats: {running_stats}")
