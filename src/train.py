@@ -204,13 +204,6 @@ def train(args, logger: logging.Logger):
     env_managers, trainer, tokenizer, generation_kwargs, device, checkpoint_dir = (
         setup_training(args, logger)
     )
-    running_stat_counters = {}
-    stat_names = ["success", "rewards", "episode_lengths", "num_invalid_actions"] # TODO: elegently integrate this so we dont need to hardcode it
-    for env_id in args.env_ids:
-        for stat_name in stat_names:  # Add all your metric names
-            metric_name = f"{stat_name}-{env_id}"
-            wandb.define_metric(metric_name, step_metric=f"step_{metric_name}")
-            running_stat_counters[metric_name] = 0
 
     # Log key arguments to wandb
     wandb.config.update(
@@ -235,7 +228,7 @@ def train(args, logger: logging.Logger):
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
         start_time = datetime.now()
-        queries, responses, rewards, stats, running_stats = sample_batch(
+        queries, responses, rewards, stats = sample_batch(
             envs=env_managers,
             tokenizer=tokenizer,
             model=trainer.model,
@@ -251,17 +244,6 @@ def train(args, logger: logging.Logger):
         # Log sampling stats to wandb
         stats["sample_time"] = sample_time
         stats["sampled_batch_size"] = len(rewards)
-
-        # Log running stats to wandb
-        for stat_name, stat_dict in running_stats.items():
-            for env_id, stat_values in stat_dict.items():
-                counter_key = f"{stat_name}-{env_id}"
-                for value in stat_values:
-                    running_stat_counters[counter_key] += 1
-                    wandb.log({
-                        f"{stat_name}-{env_id}": value,
-                        f"step_{stat_name}-{env_id}": running_stat_counters[counter_key]
-                    })
 
         # Select random subset of experiences (since sample_trajectories could return more than needed)
         indices = torch.randperm(len(rewards))[: args.batch_size].tolist()

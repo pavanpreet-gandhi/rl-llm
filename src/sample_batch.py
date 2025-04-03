@@ -45,7 +45,7 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
-    possible_env_ids = envs[0].env_ids # assuming all envs have the same env_ids
+    possible_env_ids = envs[0].env_ids + ["all"] # assuming all envs have the same env_ids
     success_by_env_id = {env_id: [] for env_id in possible_env_ids}
     rewards_by_env_id = {env_id: [] for env_id in possible_env_ids}
     episode_lengths_by_env_id = {env_id: [] for env_id in possible_env_ids}
@@ -118,10 +118,11 @@ def sample_batch(
 
                 # Store stats
                 env_id = envs[i].env_id
-                success_by_env_id[env_id].append(1 if success else 0)
-                rewards_by_env_id[env_id].append(final_reward if success else 0)
-                episode_lengths_by_env_id[env_id].append(episode_length)
-                num_invalid_actions_by_env_id[env_id].append(num_invalid_actions)
+                for key in [env_id, "all"]:
+                    success_by_env_id[key].append(1 if success else 0)
+                    rewards_by_env_id[key].append(final_reward if success else 0)
+                    episode_lengths_by_env_id[key].append(episode_length)
+                    num_invalid_actions_by_env_id[key].append(num_invalid_actions)
                 
                 # Discount rewards if successful
                 if success:
@@ -143,26 +144,27 @@ def sample_batch(
     # Convert rewards to individual tensors
     rewards_all = [torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all]
 
-    # By env and episode stats
-    running_stats = {
-        "success": success_by_env_id,
-        "rewards": rewards_by_env_id,
-        "episode_lengths": episode_lengths_by_env_id,
-        "num_invalid_actions": num_invalid_actions_by_env_id,
-    }
+    # Store stats
+    stats = {}
+    stats["total_generate_time"] = total_generate_time
+    for env_id in possible_env_ids:
+        success_rate = sum(success_by_env_id[env_id]) / len(success_by_env_id[env_id]) if len(success_by_env_id[env_id]) > 0 else 0
+        avg_reward = sum(rewards_by_env_id[env_id]) / len(rewards_by_env_id[env_id]) if len(rewards_by_env_id[env_id]) > 0 else 0
+        avg_episode_length = sum(episode_lengths_by_env_id[env_id]) / len(episode_lengths_by_env_id[env_id]) if len(episode_lengths_by_env_id[env_id]) > 0 else 0
+        avg_invalid_actions = sum(num_invalid_actions_by_env_id[env_id]) / len(num_invalid_actions_by_env_id[env_id]) if len(num_invalid_actions_by_env_id[env_id]) > 0 else 0
+        stats[f"{env_id}_success_rate"] = success_rate
+        stats[f"{env_id}_avg_reward"] = avg_reward
+        stats[f"{env_id}_avg_episode_length"] = avg_episode_length
+        stats[f"{env_id}_avg_invalid_actions"] = avg_invalid_actions
+        stats[f"{env_id}_num_samples"] = len(success_by_env_id[env_id])
 
-    # Package stats
-    stats = {
-        "total_generate_time": total_generate_time,
-    }
-
-    return queries_all, responses_all, rewards_all, stats, running_stats
+    return queries_all, responses_all, rewards_all, stats
 
 
 if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_id = "meta-llama/Llama-3.2-3B-Instruct"
+    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct"
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token is None:
@@ -187,9 +189,9 @@ if __name__ == "__main__":
         )
         for i in range(num_envs)
     ]
-
+    print("Sampling batch...")
     start_time = time.time()
-    queries, responses, rewards, stats, running_stats = sample_batch(
+    queries, responses, rewards, stats = sample_batch(
         envs=env_managers,
         tokenizer=tokenizer,
         model=model,
@@ -203,4 +205,3 @@ if __name__ == "__main__":
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
     from pprint import pprint
     pprint(f"Stats: {stats}")
-    pprint(f"Running stats: {running_stats}")
