@@ -23,7 +23,7 @@ from huggingface_hub import HfApi, create_repo, hf_hub_download
 
 import utils
 from env_manager import EnvManager
-from sample_batch import sample_batch
+from sample_batch import sample_batch, EpisodeCounter
 from custom_value_head import CustomValueHead
 from TrajactoryPPOTrainer import BatchedTrajectoryPPOTrainer, log_memory
 
@@ -44,12 +44,12 @@ def parse_args() -> Dict[str, Any]:
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
         "pretrained_dir": "CatkinChen/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
-        "load_checkpoint": True,
+        "load_checkpoint": None,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,
         "separate_vhead": False, 
         "num_shared_layers": None,
-        "num_steps_train": 90,
+        "num_steps_train": 175,
         "num_envs": 4,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
@@ -129,7 +129,7 @@ def setup_training(args, logger: logging.Logger):
         # Load model and tokenizer from checkpoint
         pretrained_dir = args.pretrained_dir
         # Load the base model and tokenizer
-        model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir)
+        model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir, torch_dtype=torch.bfloat16)
         if args.separate_vhead:
             hidden_size = model.config.hidden_size
             model.v_head = CustomValueHead(hidden_size)
@@ -226,6 +226,7 @@ def train(args, logger: logging.Logger):
     )
     logger.info("Logged key arguments to wandb")
 
+    episode_counter = EpisodeCounter()
     logger.info("STARTING TRAINING LOOP")
     for step in tqdm(range(args.num_steps_train)):
 
@@ -239,9 +240,11 @@ def train(args, logger: logging.Logger):
             generation_kwargs=generation_kwargs,
             device=device,
             batch_size=args.batch_size,
+            logger=logger,
             context_window=args.context_window,
             reasoning_flag=args.reasoning_flag,
-            trajectory_rl=args.trajactory_rl
+            trajectory_rl=args.trajactory_rl,
+            episode_counter=episode_counter
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")

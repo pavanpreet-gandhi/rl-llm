@@ -9,7 +9,21 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import AutoModelForCausalLMWithValueHead
 from TrajactoryPPOTrainer import log_memory, BatchedTrajectoryPPOTrainer
 from trl import PPOTrainer, PPOConfig
+import wandb
 
+class EpisodeCounter:
+    def __init__(self):
+        self.count = 0
+        self.last_episode = 0
+        self.batch_count = 0
+    
+    def increment(self):
+        self.count += 1
+        return self.count
+    
+    def new_batch(self):
+        self.last_episode = self.count
+        self.batch_count += 1
 
 def sample_batch(
         envs: List[EnvManager],
@@ -22,6 +36,7 @@ def sample_batch(
         context_window: int = 5, 
         reasoning_flag: bool = False,
         trajectory_rl: bool = False,
+        episode_counter: EpisodeCounter = None
 ):
     """
     Sample a batch of experiences using the model from the given environments.
@@ -29,7 +44,8 @@ def sample_batch(
     # Setup
     num_envs = len(envs)
     system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
-
+    episode_counter = episode_counter or EpisodeCounter()
+    episode_counter.new_batch()
     # Initialize global storage lists
     queries_all, responses_all, rewards_all = [], [], []
 
@@ -49,6 +65,8 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
+    success_count = 0
+    total_count = 0
 
     # Main loop
     while len(rewards_all) < batch_size:
@@ -111,8 +129,11 @@ def sample_batch(
 
             if done:
                 # Collect stats
+                total_count += 1
                 final_reward = reward
                 success = True if final_reward > 0 else False
+                success_count += 1 if success else 0
+                episode_counter.increment()
                 episode_length = len(rewards_ep[i])
                 
                 if trajectory_rl and isinstance(trainer, BatchedTrajectoryPPOTrainer):
@@ -143,10 +164,17 @@ def sample_batch(
     
     # Convert rewards to individual tensors
     rewards_all = [torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all]
-
+    success_rate = success_count / total_count if total_count > 0 else 0
+    logger.info(f"Batch Success Rate: {success_rate:.2f} ({success_count}/{total_count}) at Batch {episode_counter.batch_count} from {episode_counter.last_episode} to {episode_counter.count}")
+    wandb.log({
+        "success_rate": success_rate,
+        "success_count_per_batch": success_count,
+        "total_count_per_batch": total_count,
+        "episode_count_total": episode_counter.count
+        }, step=episode_counter.count)
     # Package stats
     stats = {
-        "total_generate_time": total_generate_time,
+        "total_generate_time": total_generate_time
     }
 
     return queries_all, responses_all, rewards_all, stats
