@@ -162,14 +162,18 @@ def sample_batch(
 if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct" # "meta-llama/Llama-3.2-3B-Instruct"
+    model_id = "meta-llama/Llama-3.2-3B-Instruct"
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     generation_kwargs = {
         "max_new_tokens": 20,
         "do_sample": True,
         "top_k": 10,
         "top_p": 0.95,
         "temperature": 0.8,
+        "pad_token_id": tokenizer.pad_token_id,
     }
     env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"]
     context_window = 3
@@ -187,7 +191,7 @@ if __name__ == "__main__":
     start_time = time.time()
     queries, responses, rewards, stats, running_stats = sample_batch(
         envs=env_managers,
-        tokenizer=AutoTokenizer.from_pretrained(model_id),
+        tokenizer=tokenizer,
         model=model,
         generation_kwargs=generation_kwargs,
         device=device,
