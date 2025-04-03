@@ -6,7 +6,8 @@ import math
 import logging
 
 def log_memory(logger, point):
-    logger.info(f"{point} - Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, "
+    if logger is not None:
+        logger.info(f"{point} - Allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB, "
                 f"Max: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
 
 class BatchedTrajectoryPPOTrainer(PPOTrainer):

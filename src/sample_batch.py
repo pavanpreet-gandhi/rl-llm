@@ -155,7 +155,7 @@ def sample_batch(
 if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_id = "HuggingFaceTB/SmolLM2-135M-Instruct" # "meta-llama/Llama-3.2-3B-Instruct"
+    model_id = "meta-llama/Llama-3.2-3B-Instruct"  # "HuggingFaceTB/SmolLM2-135M-Instruct"
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     trainer = BatchedTrajectoryPPOTrainer(model=model)
     generation_kwargs = {

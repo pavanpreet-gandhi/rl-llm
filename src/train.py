@@ -34,31 +34,31 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "delete-me",  # TODO: "babyai-ppo-experiments"
+        "project_name": "babyai-classical-ppo-experiments",  # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "entity": "OE_2025",
-        "push_to_hub": False, # TODO: True
+        "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
         "save_every": 10,  # TODO: 10
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "Heisenger/babyai-ppo-experiments-2025-04-02_16-47-48",  # add path for the pretrained model "your-hf-username/your-model-repo"
-        "load_checkpoint": False,
+        "pretrained_dir": "CatkinChen/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
+        "load_checkpoint": True,
         # Training config
-        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct", # "meta-llama/Llama-3.2-3B-Instruct",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,
         "separate_vhead": False, 
         "num_shared_layers": None,
-        "num_steps_train": 10_000,
+        "num_steps_train": 90,
         "num_envs": 4,  # TODO: 4
         # PPO config
-        "batch_size": 4,  # TODO: 128
-        "mini_batch_size": 4,  # TODO: 64
+        "batch_size": 128,  # TODO: 128
+        "mini_batch_size": 16,  # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
         # Env config
-        "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
+        "env_ids": ["BabyAI-GoToLocal-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 2,  # Number of previous experiences to keep in context
