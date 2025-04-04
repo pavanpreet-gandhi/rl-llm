@@ -251,7 +251,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     # set up logger and wandb
-    wandb.init(project=args.project_name, name=args.experiment_name)
+    wandb.init(project=args.project_name, name=args.experiment_name, entity=args.entity)
     logger = utils.create_logger(args.experiment_name, console_output=True)
     logger.info(f"Using arguments: {args}")
 
