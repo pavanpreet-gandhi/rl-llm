@@ -27,11 +27,11 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-ppo-experiments", # TODO: "babyai-ppo-experiments"
+        "project_name": "babyai-ppo-pre-experiments", # TODO: "babyai-ppo-experiments"
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
         "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
-
+        "entity": "OE_2025",
         # Checkpoint config
         "save_every": 25, # TODO: 25
         "checkpoint_dir": "checkpoints",
@@ -50,11 +50,11 @@ def parse_args() -> Dict[str, Any]:
         "learning_rate": 1.41e-5,
 
         # Env config
-        "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
+        "env_ids": ["BabyAI-GoTo-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 1, # Number of previous experiences to keep in context
-        "reasoning_flag": False,
+        "reasoning_flag": True,
         
         # Generation kwargs
         "min_length": -1, # don't ignore the EOS token
