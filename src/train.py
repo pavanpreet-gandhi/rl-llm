@@ -235,7 +235,7 @@ def train(args, logger: logging.Logger):
             generation_kwargs,
             batch_size=args.batch_size,
             context_window=args.context_window,
-            logger=logger
+            reasoning_flag=args.reasoning_flag,
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")

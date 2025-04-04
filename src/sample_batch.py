@@ -17,6 +17,7 @@ def sample_batch(
         batch_size: int,
         logger: logging.Logger = None,
         context_window: int = 5, # Number of previous experiences to keep in context
+        reasoning_flag: bool = False,
     ) -> Tuple[List[torch.Tensor], List[float], List[torch.Tensor]]:
     """"
     Sample a batch of experiences from the environment.
@@ -37,7 +38,7 @@ def sample_batch(
 
     # Reset envs and initialize contexts
     contexts = [[] for _ in range(num_envs)]
-    system_prompt_template = utils.get_system_prompt()
+    system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
     missions, text_obss = zip(*[env.reset() for env in env_managers])
     for i, (context, mission, text_obs) in enumerate(zip(contexts, missions, text_obss)):
         system_prompt = system_prompt_template.replace("{goal}", mission)
