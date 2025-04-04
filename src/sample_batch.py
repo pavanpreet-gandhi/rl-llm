@@ -89,6 +89,11 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
+    possible_env_ids = envs[0].env_ids + ["all"] # assuming all envs have the same env_ids
+    success_by_env_id = {env_id: [] for env_id in possible_env_ids}
+    rewards_by_env_id = {env_id: [] for env_id in possible_env_ids}
+    episode_lengths_by_env_id = {env_id: [] for env_id in possible_env_ids}
+    num_invalid_actions_by_env_id = {env_id: [] for env_id in possible_env_ids}
 
     # Main loop
     while len(rewards_all) < batch_size:
@@ -154,6 +159,15 @@ def sample_batch(
                 success = True if final_reward > 0 else False
                 episode_counter.increment(success=success)
                 episode_length = len(rewards_ep[i])
+                num_invalid_actions = sum([r < 0 for r in rewards_ep[i]])
+
+                # Store stats
+                env_id = envs[i].env_id
+                for key in [env_id, "all"]:
+                    success_by_env_id[key].append(1 if success else 0)
+                    rewards_by_env_id[key].append(final_reward if success else 0)
+                    episode_lengths_by_env_id[key].append(episode_length)
+                    num_invalid_actions_by_env_id[key].append(num_invalid_actions)
                 
                 if trajectory_rl and isinstance(trainer, BatchedTrajectoryPPOTrainer):
                     targets = trainer.compute_returns(
@@ -186,24 +200,23 @@ def sample_batch(
     
     # Convert rewards to individual tensors
     rewards_all = [torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all]
-    batch_success_rate = episode_counter.get_batch_success_rate()
-    total_success_rate = episode_counter.get_total_success_rate()
-    batch_success_count = episode_counter.batch_success_count
-    total_success_count = episode_counter.total_success_count
-    batch_total_count = episode_counter.batch_episode_count
-    total_count = episode_counter.total_episode_count
-    logger.info(f"Batch Success Rate: {batch_success_rate:.2f} ({batch_success_count}/{batch_total_count}) at Batch {episode_counter.batch_count} from {episode_counter.last_episode} to {total_count}")
-    logger.info(f"Total Success Rate: {total_success_rate:.2f} ({total_success_count}/{total_count}) after Batch {episode_counter.batch_count}")
+    
     # Package stats
-    stats = {
-        "total_generate_time": total_generate_time,
-        "batch_success_rate": batch_success_rate,
-        "success_count_per_batch": batch_success_count,
-        "episode_count_per_batch": batch_total_count,
-        "total_success_rate": total_success_rate,
-        "success_count_total": total_success_count,
-        "episode_count_total": total_count
-    }
+    stats = {}
+    stats["total_generate_time"] = total_generate_time
+    for env_id in possible_env_ids:
+        success_rate = sum(success_by_env_id[env_id]) / len(success_by_env_id[env_id]) if len(success_by_env_id[env_id]) > 0 else 0
+        avg_reward = sum(rewards_by_env_id[env_id]) / len(rewards_by_env_id[env_id]) if len(rewards_by_env_id[env_id]) > 0 else 0
+        avg_episode_length = sum(episode_lengths_by_env_id[env_id]) / len(episode_lengths_by_env_id[env_id]) if len(episode_lengths_by_env_id[env_id]) > 0 else 0
+        avg_invalid_actions = sum(num_invalid_actions_by_env_id[env_id]) / len(num_invalid_actions_by_env_id[env_id]) if len(num_invalid_actions_by_env_id[env_id]) > 0 else 0
+        stats[f"{env_id}_success_rate"] = success_rate
+        stats[f"{env_id}_avg_reward"] = avg_reward
+        stats[f"{env_id}_avg_episode_length"] = avg_episode_length
+        stats[f"{env_id}_avg_invalid_actions"] = avg_invalid_actions
+        stats[f"{env_id}_num_samples"] = len(success_by_env_id[env_id])
+        stats["success_count_total"] = episode_counter.total_success_count,
+        stats["episode_count_total"] = episode_counter.total_episode_count
+        stats["total_success_rate"] = episode_counter.get_total_success_rate()
 
     return queries_all, responses_all, rewards_all, stats
 
