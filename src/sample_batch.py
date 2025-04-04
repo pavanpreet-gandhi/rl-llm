@@ -143,11 +143,11 @@ if __name__=="__main__":
         "top_p": 0.95,
         "temperature": 0.8,
     }
-    env_id = "BabyAI-GoToPickupOnly-v0" # "BabyAI-MixedTrainLocal-v0"
+    env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"]
     context_window = 5
 
     num_envs = 1
-    env_managers = [EnvManager(gym.make(env_id, seed=i)) for i in range(num_envs)]
+    env_managers = [EnvManager(env_ids)]
     batch_size = 8
 
     start_time = time.time()

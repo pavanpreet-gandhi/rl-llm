@@ -38,7 +38,6 @@ def parse_args() -> Dict[str, Any]:
 
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", 
-        "env_id": "BabyAI-GoTo-v0",
         "num_shared_layers": None,
         "num_steps_train": 1000,
         "num_envs": 4, # TODO: 4
@@ -51,9 +50,11 @@ def parse_args() -> Dict[str, Any]:
         "learning_rate": 1.41e-5,
 
         # Env config
+        "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 1, # Number of previous experiences to keep in context
+        "reasoning_flag": False,
         
         # Generation kwargs
         "min_length": -1, # don't ignore the EOS token
@@ -85,13 +86,14 @@ def setup_training(args, logger: logging.Logger):
     # Set up environment managers
     env_managers = [
         EnvManager(
-            gym.make(args.env_id, seed=i), 
+            env_ids=args.env_ids, 
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
+            reasoning_flag=args.reasoning_flag
         )
         for i in range(args.num_envs)
     ]
-    logger.info(f"Created environment: {args.env_id}")
+    logger.info(f"Created environment: {args.env_ids} with {args.num_envs} instances")
 
     # Create checkpoints directory if it doesn't exist
     checkpoint_dir = os.path.join(args.checkpoint_dir, args.experiment_name)
