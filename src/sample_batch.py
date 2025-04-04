@@ -9,21 +9,38 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import AutoModelForCausalLMWithValueHead
 from TrajactoryPPOTrainer import log_memory, BatchedTrajectoryPPOTrainer
 from trl import PPOTrainer, PPOConfig
-import wandb
 
 class EpisodeCounter:
     def __init__(self):
-        self.count = 0
         self.last_episode = 0
         self.batch_count = 0
+        self.total_success_count = 0
+        self.total_episode_count = 0
+        self.batch_success_count = 0
+        self.batch_episode_count = 0
     
-    def increment(self):
-        self.count += 1
-        return self.count
+    def increment(self, success: bool = False):
+        if success:
+            self.total_success_count += 1
+            self.batch_success_count += 1
+        self.total_episode_count += 1
+        self.batch_episode_count += 1
     
     def new_batch(self):
-        self.last_episode = self.count
+        self.last_episode = self.total_episode_count
         self.batch_count += 1
+        self.batch_success_count = 0
+        self.batch_episode_count = 0
+        
+    def get_batch_success_rate(self):
+        if self.batch_episode_count == 0:
+            return 0
+        return self.batch_success_count / self.batch_episode_count
+    
+    def get_total_success_rate(self):
+        if self.total_episode_count == 0:
+            return 0
+        return self.total_success_count / self.total_episode_count
 
 def sample_batch(
         envs: List[EnvManager],
@@ -65,8 +82,6 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
-    success_count = 0
-    total_count = 0
 
     # Main loop
     while len(rewards_all) < batch_size:
@@ -75,30 +90,26 @@ def sample_batch(
         start_time = time.time()
 
         # Clip contexts to the last context_window observations (keep the first system message)
-        clipped_contexts = []
+        queries = []
         for context in contexts:
             if len(context) > (2 * context_window + 1):
                 clipped_context = [context[0]] + context[-(2*context_window)+1:]
             else:
                 clipped_context = context
-            clipped_contexts.append(clipped_context)
-
-        # Create queries
-        queries = tokenizer.apply_chat_template(
-            clipped_contexts, 
-            padding=True,
-            return_tensors="pt", 
-            add_generation_prompt=True
-        ).to(device)
-        attention_mask = (queries != tokenizer.pad_token_id).long()
+            this_query = tokenizer.apply_chat_template(
+                            clipped_context,
+                            return_tensors="pt", 
+                            add_generation_prompt=True
+                        ).squeeze(0)
+            queries.append(this_query)
 
         # Generate responses
-        output = trainer.model.generate(
+        output = trainer.generate(
             queries,
-            attention_mask=attention_mask,
-            **generation_kwargs,
+            generation_kwargs=generation_kwargs,
+            return_prompt=False
         )
-        responses = output[:, queries.shape[-1]:]
+        responses = output
 
         # Extract actions
         actions = tokenizer.batch_decode(
@@ -129,11 +140,9 @@ def sample_batch(
 
             if done:
                 # Collect stats
-                total_count += 1
                 final_reward = reward
                 success = True if final_reward > 0 else False
-                success_count += 1 if success else 0
-                episode_counter.increment()
+                episode_counter.increment(success=success)
                 episode_length = len(rewards_ep[i])
                 
                 if trajectory_rl and isinstance(trainer, BatchedTrajectoryPPOTrainer):
@@ -164,17 +173,23 @@ def sample_batch(
     
     # Convert rewards to individual tensors
     rewards_all = [torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all]
-    success_rate = success_count / total_count if total_count > 0 else 0
-    logger.info(f"Batch Success Rate: {success_rate:.2f} ({success_count}/{total_count}) at Batch {episode_counter.batch_count} from {episode_counter.last_episode} to {episode_counter.count}")
-    wandb.log({
-        "success_rate": success_rate,
-        "success_count_per_batch": success_count,
-        "total_count_per_batch": total_count,
-        "episode_count_total": episode_counter.count
-        }, step=episode_counter.count)
+    batch_success_rate = episode_counter.get_batch_success_rate()
+    total_success_rate = episode_counter.get_total_success_rate()
+    batch_success_count = episode_counter.batch_success_count
+    total_success_count = episode_counter.total_success_count
+    batch_total_count = episode_counter.batch_episode_count
+    total_count = episode_counter.total_episode_count
+    logger.info(f"Batch Success Rate: {batch_success_rate:.2f} ({batch_success_count}/{batch_total_count}) at Batch {episode_counter.batch_count} from {episode_counter.last_episode} to {total_count}")
+    logger.info(f"Total Success Rate: {total_success_rate:.2f} ({total_success_count}/{total_count}) after Batch {episode_counter.batch_count}")
     # Package stats
     stats = {
-        "total_generate_time": total_generate_time
+        "total_generate_time": total_generate_time,
+        "batch_success_rate": batch_success_rate,
+        "success_count_per_batch": batch_success_count,
+        "episode_count_per_batch": batch_total_count,
+        "total_success_rate": total_success_rate,
+        "success_count_total": total_success_count,
+        "episode_count_total": total_count
     }
 
     return queries_all, responses_all, rewards_all, stats

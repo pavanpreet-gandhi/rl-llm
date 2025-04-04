@@ -49,7 +49,7 @@ def parse_args() -> Dict[str, Any]:
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,
         "separate_vhead": False, 
         "num_shared_layers": None,
-        "num_steps_train": 175,
+        "num_steps_train": 50,
         "num_envs": 4,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
@@ -57,6 +57,7 @@ def parse_args() -> Dict[str, Any]:
         "optimize_device_cache": False,
         "early_stopping": False,
         "learning_rate": 1.41e-5,
+        "kl_penalty" : "kl", # default "kl"
         # Env config
         "env_ids": ["BabyAI-GoToLocal-v0"],
         "consecutive_invalid_actions_allowed": 5,
@@ -65,8 +66,8 @@ def parse_args() -> Dict[str, Any]:
         "reasoning_flag": False,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
-        "top_k": 0.0,  # no top-k sampling
-        "top_p": 1.0,  # no nucleus sampling
+        "top_k": 0,  # no top-k sampling
+        "top_p": 1,  # no nucleus sampling
         "do_sample": True,  # yes, we want to sample
         "max_new_tokens": 15,
         "temperature": 0.8,
@@ -168,6 +169,7 @@ def setup_training(args, logger: logging.Logger):
         is_peft_model=args.use_peft,
         exp_name=args.experiment_name,
         log_with="wandb",
+        kl_penalty=args.kl_penalty
     )
     trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lam)
     logger.info("Initialized PPO Trainer")
