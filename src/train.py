@@ -59,7 +59,7 @@ def parse_args() -> Dict[str, Any]:
         "learning_rate": 1.41e-5,
         "kl_penalty" : "kl", # default "kl"
         # Env config
-        "env_ids": ["BabyAI-GoToLocal-v0"],
+        "env_ids": ["BabyAI-GoTo-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 2,  # Number of previous experiences to keep in context
@@ -185,7 +185,7 @@ def setup_training(args, logger: logging.Logger):
         "top_k": args.top_k,
         "top_p": args.top_p,
         "temperature": args.temperature,
-        "pad_token_id": tokenizer.eos_token_id,
+        "pad_token_id": tokenizer.pad_token_id,
     }
     logger.info("Set up generation kwargs")
 
