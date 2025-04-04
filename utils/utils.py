@@ -59,15 +59,19 @@ def create_logger(name: str, log_dir: str = "logs", console_output: bool = False
     return logger
 
 
-def get_system_prompt() -> str:
+def get_system_prompt(reasoning_flag=False) -> str:
     """
     Load the system prompt from a text file.
-    
+
     Returns:
         str: The system prompt
     """
-    with open("resources/system_prompt.txt", "r") as f:
-        system_prompt = f.read()
+    if reasoning_flag:
+        with open("resources/system_prompt_reasoning.txt", "r") as f:
+            system_prompt = f.read()
+    else:
+        with open("resources/system_prompt.txt", "r") as f:
+            system_prompt = f.read()
     return system_prompt
 
 
