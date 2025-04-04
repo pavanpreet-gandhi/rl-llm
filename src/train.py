@@ -140,7 +140,9 @@ def setup_training(args, logger: logging.Logger):
         value_head_path = hf_hub_download(
             repo_id=pretrained_dir, filename="value_head.bin"
         )
-        model.v_head.load_state_dict(torch.load(value_head_path))#.to(device).to(dtype=torch.bfloat16)
+        model.v_head.load_state_dict(
+            torch.load(value_head_path)
+        )  # .to(device).to(dtype=torch.bfloat16)
 
         logger.info(f"Loaded model and tokenizer from {pretrained_dir}")
 
@@ -153,7 +155,9 @@ def setup_training(args, logger: logging.Logger):
         ).to(device)
         if args.separate_vhead:
             hidden_size = model.config.hidden_size
-            model.v_head = CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
+            model.v_head = (
+                CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
+            )
         logger.info("Loaded model and tokenizer from scratch")
 
     # Create reference model
@@ -230,7 +234,31 @@ def train(args, logger: logging.Logger):
 
     episode_counter = EpisodeCounter()
     logger.info("STARTING TRAINING LOOP")
+
+    # Create logger for training
+    train_logger = logging.getLogger("train_logger")
+    train_logger.setLevel(logging.INFO)
+    # Remove any existing handlers to avoid duplicate logging
+    # Create a file handler to write logs to a file
+    train_log_file = "logs/training_logs.txt"
+    file_handler = logging.FileHandler(train_log_file)
+    file_handler.setLevel(logging.INFO)
+
+    # Create a formatter and add it to the handler
+    formatter = logging.Formatter("%(asctime)s - %(message)s")
+    file_handler.setFormatter(formatter)
+    train_logger.handlers = []  # Clear existing handlers
+    # Add only the file handler
+    train_logger.addHandler(file_handler)
+    # Ensure logs are not printed to the console
+    train_logger.propagate = False
+
+    # Add the handler to the logger
+    train_logger.addHandler(file_handler)
+    wandb.save(train_log_file)
+
     for step in tqdm(range(args.num_steps_train)):
+        train_logger.info(f"TRAINING STEP {step + 1} STARTED")
 
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
@@ -242,9 +270,9 @@ def train(args, logger: logging.Logger):
             generation_kwargs=generation_kwargs,
             device=device,
             batch_size=args.batch_size,
-            logger=logger,
             context_window=args.context_window,
             reasoning_flag=args.reasoning_flag,
+            logger=train_logger,
             trajectory_rl=args.trajactory_rl,
             episode_counter=episode_counter
         )
@@ -281,6 +309,10 @@ def train(args, logger: logging.Logger):
         batch = {"query": query, "response": response}
         trainer.log_stats(stats, batch, rewards)
 
+        # Upload the training log file to wandb
+        train_logger.info("Uploaded training_logs.txt to wandb")
+        wandb.save("training_logs.txt")
+
         # Save checkpoint if needed
         if args.save_every > 0 and (step + 1) % args.save_every == 0:
             checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint-{step + 1}")
@@ -311,6 +343,7 @@ def train(args, logger: logging.Logger):
                 except Exception as e:
                     logger.error(f"Failed to push to hub: {e}")
                     logger.info("Continuing with training")
+
 
 
 if __name__ == "__main__":

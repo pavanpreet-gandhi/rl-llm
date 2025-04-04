@@ -58,6 +58,8 @@ def sample_batch(
     """
     Sample a batch of experiences using the model from the given environments.
     """
+    if logger is None:
+        print("train logger is None")
     # Setup
     num_envs = len(envs)
     system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
@@ -71,6 +73,11 @@ def sample_batch(
     responses_ep = [[] for _ in range(num_envs)]
     rewards_ep = [[] for _ in range(num_envs)]
     dones_ep = [[] for _ in range(num_envs)]
+
+    # For train logger logging purposes
+    txt_queries_ep = [[] for _ in range(num_envs)]
+    txt_actions_ep = [[] for _ in range(num_envs)]
+
 
     # Reset envs and contexts
     contexts = [[] for _ in range(num_envs)] # each env has its own context represented as a list of system, user, and assistant messages
@@ -89,7 +96,7 @@ def sample_batch(
         # Time tokenization and generation
         start_time = time.time()
 
-        # Clip contexts to the last context_window observations (keep the first system message)
+        # Clip contexts and create query tensors
         queries = []
         for context in contexts:
             if len(context) > (2 * context_window + 1):
@@ -129,6 +136,9 @@ def sample_batch(
             queries_ep[i].append(queries[i])
             responses_ep[i].append(responses[i])
 
+            txt_actions_ep[i].append(actions[i].strip())
+            txt_queries_ep[i].append(tokenizer.decode(queries[i], skip_special_tokens=True).strip())
+
             # Take step in the environment
             text_obs, reward, done = envs[i].step(actions[i])
             rewards_ep[i].append(reward)
@@ -163,6 +173,9 @@ def sample_batch(
                 # Append to global storage
                 queries_all.extend(queries_ep[i])
                 responses_all.extend(responses_ep[i])
+                
+                # Log query, response, and reward
+                logger.info(f"Env {i}: Query: {txt_queries_ep[i]}, Response: {txt_actions_ep[i]}, Reward: {rewards_ep[i]}")
 
                 # Reset environment, context, and per-environment storage
                 queries_ep[i], responses_ep[i], rewards_ep[i], dones_ep[i], contexts[i] = [], [], [], [], []
