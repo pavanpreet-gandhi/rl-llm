@@ -1,3 +1,1 @@
 model_id,env_id,context_window,reasoning_flag,num_episodes,avg_success,avg_reward,avg_length,avg_invalid,avg_total_time,avg_generate_time
-meta-llama/Llama-3.2-3B-Instruct,BabyAI-Pickup-v0,3,False,22,0.5,0.38558238636363634,40.27272727272727,0.13636363636363635,39.76461486816406,39.60170612335205
-meta-llama/Llama-3.2-3B-Instruct,BabyAI-Pickup-v0,5,False,17,0.23529411764705882,0.07481617647058825,55.94117647058823,1.7058823529411764,55.05663642883301,54.90370397567749
