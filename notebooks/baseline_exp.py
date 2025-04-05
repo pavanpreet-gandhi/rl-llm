@@ -9,13 +9,13 @@ from src import EnvManager, sample_batch
 # =================== CONFIG ===================
 PLOTS_DIR = "outputs/plots"
 TABLE_PATH = "outputs/results_summary.csv"
-MODEL_IDS = ["Qwen/Qwen2-1.5B-Instruct"]
-ENV_IDS = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0", "BabyAI-Open-v0"]
-CONTEXT_WINDOWS = [1, 2, 3, 4, 5]
+MODEL_IDS = ["meta-llama/Llama-3.2-3B-Instruct"]# ["meta-llama/Llama-3.2-3B-Instruct"]
+ENV_IDS = ["BabyAI-Pickup-v0"]
+CONTEXT_WINDOWS = [3, 5]
 NUM_ENVS = 4
-NUM_BATCHES = 3
+NUM_BATCHES = 5
 BATCH_SIZE = 128
-REASONING_FLAG = True
+REASONING_FLAG = False
 os.makedirs(PLOTS_DIR, exist_ok=True)
 from transformers import logging
 logging.set_verbosity_error()

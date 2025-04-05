@@ -1,0 +1,89 @@
+prompt_style_1:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. 
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
+
+prompt_style_2:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. Explore if target object is not visible yet.
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
+
+prompt_style_3:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 30 words about which action best advances your goal. Explore if target object is not visible yet.
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
+
+prompt_style_4:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. Be very concise. Explore if target object is not visible yet.
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
+
+prompt_style_5:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. Navigational task in a grid.
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
+
+Prompt style 6:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. You are navigating in a grid and can only see what is ahead.
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
