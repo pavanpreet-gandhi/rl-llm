@@ -87,3 +87,33 @@ Your response should end with "final answer: [answer]", where final answer is a 
 - toggle
 
 PLAY!
+
+Prompt style 7:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. You are navigating in a grid and can only see what is ahead. You may need to ignore distractors.
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
+
+Prompt style 8:
+
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. You only see what is ahead, so explore if target is not visible and ignore distractors. 
+
+Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
+
+- turn left
+- turn right
+- go forward
+- pick up
+- drop
+- toggle
+
+PLAY!
