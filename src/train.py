@@ -35,7 +35,7 @@ def parse_args() -> Dict[str, Any]:
     args = {
         # Logging config
         "project_name": "babyai-classical-ppo-prefinal-experiments",  # TODO: "babyai-ppo-experiments"
-        "experiment_name": "mix_5_no_reason_50_0.9_0.7",
+        "experiment_name": "mix_5_no_50_0.9_0.7", #"mix_5_no_reason_50_0.9_0.7",
         "entity": "OE_2025",
         "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
@@ -63,7 +63,7 @@ def parse_args() -> Dict[str, Any]:
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 5,  # Number of previous experiences to keep in context
-        "reasoning_flag": False,
+        "reasoning_flag": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 50,  # no top-k sampling
