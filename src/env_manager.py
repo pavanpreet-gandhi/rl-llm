@@ -30,9 +30,11 @@ class EnvManager:
     
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         if self.reasoning_flag:
+            issue_flag = True if "final answer:" in text_action else False
+
             text_action = text_action.split("final answer:")[-1].strip()
             action = utils.text_to_action.get(text_action, None)
-            if action is None or "final answer:" not in text_action:
+            if action is None or issue_flag:
                 self.consecutive_invalid_actions += 1
                 invalid_action_message = (
                     "Invalid format. Think step-by-step and end your response with 'final answer: [answer]', where [answer] is one of: "

@@ -78,7 +78,7 @@ def parse_args() -> Dict[str, Any]:
         "lora_dropout": 0.05,
         "lora_bias": "none",
         # RL config
-        "trajactory_rl": True,
+        "trajactory_rl": False,
         "gamma": 0.9,
         "lam": 0.95,
     }
