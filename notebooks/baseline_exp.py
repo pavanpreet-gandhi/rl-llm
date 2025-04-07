@@ -10,12 +10,12 @@ from src import EnvManager, sample_batch
 PLOTS_DIR = "outputs/plots"
 TABLE_PATH = "outputs/results_summary.csv"
 MODEL_IDS = ["meta-llama/Llama-3.2-3B-Instruct"]
-ENV_IDS = ["BabyAI-GoTo-v0"] #, "BabyAI-Pickup-v0", "BabyAI-Open-v0"]
-CONTEXT_WINDOWS = [1, 2, 3]
+ENV_IDS = ["BabyAl-GoTo-v0", "BabyAl-Pickup-v0", "BabyAl-Open-v0", "BabyAI-PutNext-v0", "BabyAI-PickUpSeqGoTo-v0"]
+CONTEXT_WINDOWS = [1,2,3,4,5]
 NUM_ENVS = 4
-NUM_BATCHES = 2
+NUM_BATCHES = 10
 BATCH_SIZE = 128
-REASONING_FLAG = True
+REASONING_FLAG = False
 os.makedirs(PLOTS_DIR, exist_ok=True)
 from transformers import logging
 logging.set_verbosity_error()
