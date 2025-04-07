@@ -34,8 +34,8 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-classical-ppo-experiments",  # TODO: "babyai-ppo-experiments"
-        "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+        "project_name": "babyai-classical-ppo-prefinal-experiments",  # TODO: "babyai-ppo-experiments"
+        "experiment_name": "mix_5_no_reason_50_0.9_0.7",
         "entity": "OE_2025",
         "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
@@ -49,7 +49,7 @@ def parse_args() -> Dict[str, Any]:
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,
         "separate_vhead": False, 
         "num_shared_layers": None,
-        "num_steps_train": 50,
+        "num_steps_train": 500,
         "num_envs": 4,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
@@ -59,18 +59,18 @@ def parse_args() -> Dict[str, Any]:
         "learning_rate": 1.41e-5,
         "kl_penalty" : "kl", # default "kl"
         # Env config
-        "env_ids": ["BabyAI-GoTo-v0"],
+        "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
-        "context_window": 2,  # Number of previous experiences to keep in context
+        "context_window": 5,  # Number of previous experiences to keep in context
         "reasoning_flag": False,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
-        "top_k": 0,  # no top-k sampling
-        "top_p": 1,  # no nucleus sampling
+        "top_k": 50,  # no top-k sampling
+        "top_p": 0.9,  # no nucleus sampling
         "do_sample": True,  # yes, we want to sample
         "max_new_tokens": 15,
-        "temperature": 0.8,
+        "temperature": 0.7,
         # PEFT config
         "use_peft": True,
         "lora_r": 32,
