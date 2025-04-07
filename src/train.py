@@ -35,7 +35,7 @@ def parse_args() -> Dict[str, Any]:
     args = {
         # Logging config
         "project_name": "babyai-classical-ppo-prefinal-experiments",  # TODO: "babyai-ppo-experiments"
-        "experiment_name": "mix_5_no_reason_50_0.9_0.7",
+        "experiment_name": "mix_5_no_50_0.9_0.7", #"mix_5_no_reason_50_0.9_0.7",
         "entity": "OE_2025",
         "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
@@ -43,7 +43,7 @@ def parse_args() -> Dict[str, Any]:
         "save_every": 10,  # TODO: 10
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "CatkinChen/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
+        "pretrained_dir": "Heisenger/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": None,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,
@@ -63,7 +63,7 @@ def parse_args() -> Dict[str, Any]:
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
         "context_window": 5,  # Number of previous experiences to keep in context
-        "reasoning_flag": False,
+        "reasoning_flag": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 50,  # no top-k sampling
@@ -78,7 +78,7 @@ def parse_args() -> Dict[str, Any]:
         "lora_dropout": 0.05,
         "lora_bias": "none",
         # RL config
-        "trajactory_rl": True,
+        "trajactory_rl": False,
         "gamma": 0.9,
         "lam": 0.95,
     }

@@ -21,7 +21,7 @@ class EnvManager:
     
     def reset(self) -> Tuple[str, str]:
         self.env_id = random.choice(self.env_ids)
-        self.env = gym.make(self.env_id, disable_env_checker=True)
+        self.env = gym.make(self.env_id, disable_env_checker=True, num_dists=0)
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
         mission = obs["mission"]
@@ -30,9 +30,11 @@ class EnvManager:
     
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         if self.reasoning_flag:
+            issue_flag = True if "final answer:" not in text_action else False
+
             text_action = text_action.split("final answer:")[-1].strip()
             action = utils.text_to_action.get(text_action, None)
-            if action is None:
+            if action is None or issue_flag:
                 self.consecutive_invalid_actions += 1
                 invalid_action_message = (
                     "Invalid format. Think step-by-step and end your response with 'final answer: [answer]', where [answer] is one of: "
