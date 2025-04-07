@@ -53,7 +53,7 @@ def parse_args() -> Dict[str, Any]:
         "num_envs": 6,  # TODO: 4
         # PPO config
         "batch_size": 128,  # TODO: 128
-        "mini_batch_size": 32,  # TODO: 64
+        "mini_batch_size": 16,  # TODO: 64
         "optimize_device_cache": False,
         "early_stopping": True,
         "learning_rate": 1.41e-5,
