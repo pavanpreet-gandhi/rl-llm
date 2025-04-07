@@ -30,7 +30,7 @@ class EnvManager:
     
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         if self.reasoning_flag:
-            issue_flag = True if "final answer:" in text_action else False
+            issue_flag = True if "final answer:" not in text_action else False
 
             text_action = text_action.split("final answer:")[-1].strip()
             action = utils.text_to_action.get(text_action, None)
