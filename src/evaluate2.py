@@ -1,38 +1,37 @@
+# Import necessary libraries
 import numpy as np
 import torch
+import wandb
 import gym
 import matplotlib.pyplot as plt
-
-# Example placeholders for your environment and utility modules
 from env_manager import EnvManager
 import babyai_text
 import utils
-babyai_text.register_levels(__name__, globals())
-
+from peft import PeftModel, PeftConfig
+from evaluate2 import evaluate_models
 from typing import Dict, Any, List, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM
+babyai_text.register_levels(__name__, globals())
 
-###############################################################################
-# EVALUATION FUNCTION
-###############################################################################
 
+
+# Evaluation function to evaluate a model on a specific environment
 def evaluate(
-    model: torch.nn.Module,
-    tokenizer,
-    generation_kwargs: Dict[str, Any],
-    num_episodes: int,
-    env_id: str,
-    env_kwargs: Dict[str, Any] = {},
-    num_envs: int = 4,
-    context_window: int = 5,
-    seed_offset: int = 1000,
-    device: Union[str, torch.device] = "cuda",
-) -> Dict[str, float]:
-    """
-    Evaluate a model on a specific environment for a certain number of episodes.
-    Returns a dictionary of metrics: success_rate, avg_reward, avg_steps, etc.
-    """
+    model: torch.nn.Module, # The PyTorch model to evaluate
+    tokenizer, # Tokenizer for processing input
+    generation_kwargs: Dict[str, Any], # Dictionary of generation parameters
+    num_episodes: int, # Number of episodes to evaluate
+    env_id: str, # The environment ID
+    env_kwargs: Dict[str, Any] = {}, # Additional environment arguments
+    num_envs: int = 4, # Number of parallel environments
+    context_window: int = 5, # Context window size
+    seed_offset: int = 1000, # Offset for random seed
+) -> Dict[str, float]: # Dictionary to store evaluation metrics
+    
     print(f"Evaluating {env_id} with {num_episodes} episodes...")
+
+    # Use cuda if possible
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     # Initialize parallel environments
     try:
@@ -160,131 +159,124 @@ def evaluate(
     }
     return metrics
 
-###############################################################################
-# MAIN SCRIPT EXAMPLE:
-###############################################################################
-
-if __name__ == "__main__":
-    print("Script started")
-
-    # You can extend this list with local paths to fine-tuned checkpoints or other models
-    model_list = [
-        "meta-llama/Llama-3.2-3B-Instruct",  # baseline
-        # Add more local or remote checkpoints here, e.g.:
-        # "/path/to/finetuned-checkpoint-1000",
-        # "/path/to/finetuned-checkpoint-2000",
-        # ...
-    ]
-
-    task_types = ["BabyAI-GoToObj-v0", "BabyAI-Pickup-v0"]
-    num_eval_episodes = 10
-    num_envs = 4
-    context_window = 5
-    seed_offset = 1000
-
-    # Generation settings for each inference call
-    generation_kwargs = {
-        "max_new_tokens": 3,
-        "do_sample": False,
-        "repetition_penalty": 1.0,
-        # The following might be needed depending on your model tokenizer
-        # "pad_token_id": tokenizer.eos_token_id,
-        # "eos_token_id": tokenizer.eos_token_id,
-    }
-
-    # We'll store evaluation results in a nested dict:
-    # results[model_name][env_id] = { "success_rate": ..., "avg_reward": ..., etc. }
-    all_results = {}
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    for model_id in model_list:
-        print(f"\n=== Evaluating model: {model_id} ===")
-        # Load tokenizer & model
-        print("Loading tokenizer...")
-        tokenizer = AutoTokenizer.from_pretrained(model_id, padding_side="left")
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        print("Loading model...")
-        model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
-        model.eval()
-
+# Function to evaluate multiple models on multiple environments
+def evaluate_models(
+    models_info: List[Dict[str, Any]],
+    env_ids: List[str],
+    num_episodes: int = 10,
+    generation_kwargs: Dict[str, Any] = None,
+    env_kwargs: Dict[str, Any] = {},
+    num_envs: int = 4,
+    context_window: int = 5,
+    seed_offset: int = 1000,
+    step: int = None,
+    log_to_wandb: bool = False,
+) -> Dict[str, Dict[str, Dict[str, float]]]:
+    if generation_kwargs is None:
+        generation_kwargs = {
+            "max_new_tokens": 3,
+            "do_sample": False,
+            "repetition_penalty": 1.0,
+        }
+    results = {}
+    
+    for model_info in models_info:
+        model = model_info['model']
+        tokenizer = model_info['tokenizer']
+        model_name = model_info['name']
+        
+        print(f"\n=== Evaluating model: {model_name} ===")
         model_results = {}
-        for env_id in task_types:
-            print(f"--> Evaluating on task: {env_id}")
-            try:
-                metrics = evaluate(
-                    model=model,
-                    tokenizer=tokenizer,
-                    generation_kwargs=generation_kwargs,
-                    num_episodes=num_eval_episodes,
-                    env_id=env_id,
-                    num_envs=num_envs,
-                    context_window=context_window,
-                    seed_offset=seed_offset,
-                    device=device
-                )
-                for k, v in metrics.items():
-                    print(f"{k}: {v}")
-                model_results[env_id] = metrics
-            except Exception as e:
-                print(f"Evaluation failed for {env_id} with error: {e}")
-                model_results[env_id] = None
+        
+        for env_id in env_ids:
+            print(f"  Evaluating on environment: {env_id}")
+            metrics = evaluate(
+                model=model,
+                tokenizer=tokenizer,
+                generation_kwargs=generation_kwargs,
+                num_episodes=num_episodes,
+                env_id=env_id,
+                env_kwargs=env_kwargs,
+                num_envs=num_envs,
+                context_window=context_window,
+                seed_offset=seed_offset,
+            )
+            model_results[env_id] = metrics
+            
+            # Log to wandb if requested
+            if log_to_wandb:
+                for metric_name, value in metrics.items():
+                    wandb.log({
+                        f"eval/{model_name}/{env_id}/{metric_name}": value
+                    }, step=step)
+                    
+            # Print results
+            for k, v in metrics.items():
+                print(f"    {k}: {v:.4f}")
+                
+        results[model_name] = model_results
+    
+    return results
 
-        all_results[model_id] = model_results
+# Example usage
 
-    # -------------------------------------------------------------------------
-    # PLOTTING RESULTS
-    # -------------------------------------------------------------------------
-    # We'll plot each metric in a separate bar chart for all models & tasks.
+# Initialize wandb (optional)
+wandb.init(project="babyai-ppo-evaluation", name="peft-model-eval")
 
-    # Which metrics do we want to plot?
-    metrics_to_plot = [
-        "success_rate",
-        "avg_reward",
-        "avg_steps",
-        "invalid_action_rate",
-        "avg_steps_to_success",
-    ]
+# Load model
+checkpoint = "pavanpreet-gandhi/babyai-ppo-2025-03-30_11-36-26"
+peft_config = PeftConfig.from_pretrained(checkpoint)
 
-    # If you have multiple tasks, you can choose to plot them side-by-side or
-    # create separate figures for each task. Here, for simplicity, we'll create
-    # a separate figure *per metric* and show bars for each (model, task).
+# Get tokenizer from base model
+tokenizer = AutoTokenizer.from_pretrained(
+    peft_config.base_model_name_or_path, 
+    padding_side="left"
+)
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
 
-    # Make sure we do not create subplots in a single figure.
-    # We'll do one figure per metric, each containing multiple bars.
+# Load base model and apply PEFT adapter
+base_model = AutoModelForCausalLM.from_pretrained(
+    peft_config.base_model_name_or_path,
+    torch_dtype=torch.bfloat16,
+    device_map="cuda",
+)
+model = PeftModel.from_pretrained(base_model, checkpoint)
+model.eval()
 
-    for metric in metrics_to_plot:
-        # Prepare data
-        x_labels = []
-        values = []
-        for model_id, tasks_dict in all_results.items():
-            # For each model, we might average the metric across tasks or keep them separate
-            # If you want separate bars per (model, task), you can break it down further.
-            for env_id, env_metrics in tasks_dict.items():
-                if env_metrics is None:
-                    continue
-                val = env_metrics.get(metric, float("nan"))
-                label = f"{model_id} - {env_id}"
-                x_labels.append(label)
-                values.append(val)
+# Define evaluation environment(s)
+env_ids = ["BabyAI-GoToObj-v0", "BabyAI-Pickup-v0"]
 
-        # If we have no valid data, skip plotting
-        if not values:
-            print(f"No valid data for metric '{metric}'. Skipping.")
-            continue
+# Configure generation parameters
+generation_kwargs = {
+    "max_new_tokens": 20,
+    "do_sample": True,
+    "top_k": 10,
+    "top_p": 0.95,
+    "temperature": 0.8
+}
 
-        plt.figure()  # new figure for each metric
-        plt.bar(x_labels, values)
-        plt.title(metric.replace("_", " ").title())
-        plt.xlabel("Model / Environment")
-        plt.ylabel(metric.replace("_", " ").title())
-        plt.xticks(rotation=45, ha="right")
-        plt.tight_layout()
+# Prepare model info
+models_info = [{
+    'model': model,
+    'tokenizer': tokenizer,
+    'name': 'babyai-ppo'
+}]
 
-        # Save or display the figure as needed. Example: save to disk
-        plt.savefig(f"plot_{metric}.png", dpi=150)
-        plt.close()
+# Run evaluation
+results = evaluate_models(
+    models_info=models_info,
+    env_ids=env_ids,
+    num_episodes=50,  # More episodes for robust evaluation
+    generation_kwargs=generation_kwargs,
+    log_to_wandb=True,
+    step=0  # Use appropriate step if tracking training progress
+)
 
-    print("Evaluation complete. Plots saved.")
+# Print summary
+print("\n=== Evaluation Summary ===")
+for model_name, env_results in results.items():
+    for env_id, metrics in env_results.items():
+        print(f"{model_name} on {env_id}:")
+        for metric_name, value in metrics.items():
+            print(f"  {metric_name}: {value:.4f}")
