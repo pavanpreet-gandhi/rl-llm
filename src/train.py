@@ -55,12 +55,11 @@ def parse_args() -> Dict[str, Any]:
         "batch_size": 128,  # TODO: 128
         "mini_batch_size": 32,  # TODO: 64
         "optimize_device_cache": False,
-        "early_stopping": False,
+        "early_stopping": True,
         "learning_rate": 1.41e-5,
         "kl_penalty" : "kl", # default "kl",
         "gamma_ppo": 1.0,
         "lam_ppo": 1.0,
-        "early_stopping": True,
         # Env config
         "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
         "consecutive_invalid_actions_allowed": 5,
@@ -179,7 +178,6 @@ def setup_training(args, logger: logging.Logger):
         kl_penalty=args.kl_penalty,
         gamma=args.gamma_ppo,
         lam=args.lam_ppo,
-        early_stopping=args.early_stopping,
     )
     trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lam)
     logger.info("Initialized PPO Trainer")
