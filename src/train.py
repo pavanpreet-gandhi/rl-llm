@@ -43,7 +43,7 @@ def parse_args() -> Dict[str, Any]:
         "save_every": 10,  # TODO: 10
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "CatkinChen/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
+        "pretrained_dir": "Heisenger/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": None,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,

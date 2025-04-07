@@ -32,7 +32,7 @@ class EnvManager:
         if self.reasoning_flag:
             text_action = text_action.split("final answer:")[-1].strip()
             action = utils.text_to_action.get(text_action, None)
-            if action is None:
+            if action is None or "final answer:" not in text_action:
                 self.consecutive_invalid_actions += 1
                 invalid_action_message = (
                     "Invalid format. Think step-by-step and end your response with 'final answer: [answer]', where [answer] is one of: "
