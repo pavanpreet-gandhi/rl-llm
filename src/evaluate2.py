@@ -11,7 +11,7 @@ import utils
 from peft import PeftModel, PeftConfig
 from typing import Dict, Any, List, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from src import EnvManager, sample_batch
+from src import sample_batch
 babyai_text.register_levels(__name__, globals())
 
 # Evaluation function to evaluate a model on a specific environment
@@ -251,27 +251,32 @@ def evaluate_models(
 
                 # Increment step offset for the next evaluation
                 current_step += num_batches
-
-        results[model_name] = model_results
     
     return results
 
 # Example usage
-wandb.init(project="Evaluation", name="peft-model-eval")
+wandb.init(project="Evaluation", name="llama-32-3b-eval")
 
 models_info = [{
     'model': AutoModelForCausalLM.from_pretrained(
-        "pavanpreet-gandhi/babyai-ppo-2025-03-30_11-36-26",
+        "meta-llama/Llama-3.2-3B-Instruct",
         torch_dtype=torch.bfloat16,
         device_map="cuda",
     ),
     'tokenizer': AutoTokenizer.from_pretrained(
-        "pavanpreet-gandhi/babyai-ppo-2025-03-30_11-36-26",
+        "meta-llama/Llama-3.2-3B-Instruct", 
         padding_side="left"
     ),
-    'name': 'babyai-ppo'
+    'name': 'llama-3.2-3b'
 }]
-env_ids = ["BabyAI-GoToObj-v0"]
+env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0", "BabyAI-Open-v0", "BabyAI-PutNext-v0", "BabyAI-PickUpSeqGoTo-v0"]
+
+# Set the padding token
+for model_info in models_info:
+    tokenizer = model_info['tokenizer']
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+        print(f"Setting pad_token to eos_token for {model_info['name']}")
 
 # Adjust parameters if needed HERE
 results = evaluate_models(
