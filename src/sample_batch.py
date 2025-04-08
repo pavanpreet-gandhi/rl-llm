@@ -10,6 +10,7 @@ from trl import AutoModelForCausalLMWithValueHead
 from TrajactoryPPOTrainer import log_memory, BatchedTrajectoryPPOTrainer
 from trl import PPOTrainer, PPOConfig
 
+
 class EpisodeCounter:
     def __init__(self):
         self.last_episode = 0
@@ -18,48 +19,54 @@ class EpisodeCounter:
         self.total_episode_count = 0
         self.batch_success_count = 0
         self.batch_episode_count = 0
-    
+
     def increment(self, success: bool = False):
         if success:
             self.total_success_count += 1
             self.batch_success_count += 1
         self.total_episode_count += 1
         self.batch_episode_count += 1
-    
+
     def new_batch(self):
         self.last_episode = self.total_episode_count
         self.batch_count += 1
         self.batch_success_count = 0
         self.batch_episode_count = 0
-        
+
     def get_batch_success_rate(self):
         if self.batch_episode_count == 0:
             return 0
         return self.batch_success_count / self.batch_episode_count
-    
+
     def get_total_success_rate(self):
         if self.total_episode_count == 0:
             return 0
         return self.total_success_count / self.total_episode_count
 
+
 def sample_batch(
-        envs: List[EnvManager],
-        tokenizer: AutoTokenizer,
-        trainer: PPOTrainer,
-        generation_kwargs: Dict[str, Any],
-        device: torch.device,
-        batch_size: int,
-        logger: logging.Logger = None,
-        context_window: int = 5, 
-        reasoning_flag: bool = False,
-        trajectory_rl: bool = False,
-        episode_counter: EpisodeCounter = None
+    envs: List[EnvManager],
+    tokenizer: AutoTokenizer,
+    trainer: PPOTrainer,
+    generation_kwargs: Dict[str, Any],
+    device: torch.device,
+    batch_size: int,
+    logger: logging.Logger = None,
+    context_window: int = 5,
+    reasoning_flag: bool = False,
+    trajectory_rl: bool = False,
+    episode_counter: EpisodeCounter = None,
 ):
     """
     Sample a batch of experiences using the model from the given environments.
     """
     if logger is None:
         print("train logger is None")
+
+    if tokenizer.chat_template:
+        tokenizer.chat_template = tokenizer.chat_template.replace(
+            "Cutting Knowledge Date: {{ cutoff }}\nToday Date: {{ today }}\n\n", ""
+        )
     # Setup
     num_envs = len(envs)
     system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
@@ -78,10 +85,11 @@ def sample_batch(
     txt_queries_ep = [[] for _ in range(num_envs)]
     txt_actions_ep = [[] for _ in range(num_envs)]
 
-
     # Reset envs and contexts
-    contexts = [[] for _ in range(num_envs)] # each env has its own context represented as a list of system, user, and assistant messages
-    missions, obss = zip(*[env.reset() for env in envs]) # reset all environments
+    contexts = [
+        [] for _ in range(num_envs)
+    ]  # each env has its own context represented as a list of system, user, and assistant messages
+    missions, obss = zip(*[env.reset() for env in envs])  # reset all environments
     for i in range(num_envs):
         system_prompt = system_prompt_template.replace("{goal}", missions[i])
         contexts[i].append({"role": "system", "content": system_prompt})
@@ -89,7 +97,9 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
-    possible_env_ids = envs[0].env_ids + ["all"] # assuming all envs have the same env_ids
+    possible_env_ids = envs[0].env_ids + [
+        "all"
+    ]  # assuming all envs have the same env_ids
     success_by_env_id = {env_id: [] for env_id in possible_env_ids}
     rewards_by_env_id = {env_id: [] for env_id in possible_env_ids}
     episode_lengths_by_env_id = {env_id: [] for env_id in possible_env_ids}
@@ -97,7 +107,7 @@ def sample_batch(
 
     # Main loop
     while len(rewards_all) < batch_size:
-        
+
         # Time tokenization and generation
         start_time = time.time()
 
@@ -105,21 +115,17 @@ def sample_batch(
         queries = []
         for context in contexts:
             if len(context) > (2 * context_window + 1):
-                clipped_context = [context[0]] + context[-(2*context_window)+1:]
+                clipped_context = [context[0]] + context[-(2 * context_window) + 1 :]
             else:
                 clipped_context = context
             this_query = tokenizer.apply_chat_template(
-                            clipped_context,
-                            return_tensors="pt", 
-                            add_generation_prompt=True
-                        ).squeeze(0)
+                clipped_context, return_tensors="pt", add_generation_prompt=True
+            ).squeeze(0)
             queries.append(this_query)
 
         # Generate responses
         output = trainer.generate(
-            queries,
-            generation_kwargs=generation_kwargs,
-            return_prompt=False
+            queries, generation_kwargs=generation_kwargs, return_prompt=False
         )
         responses = output
 
@@ -134,7 +140,7 @@ def sample_batch(
         end_time = time.time()
         generation_time = end_time - start_time
         total_generate_time += generation_time
-        
+
         # Process each action sequentially
         for i in range(num_envs):
             # Store query and response
@@ -142,7 +148,9 @@ def sample_batch(
             responses_ep[i].append(responses[i])
 
             txt_actions_ep[i].append(actions[i].strip())
-            txt_queries_ep[i].append(tokenizer.decode(queries[i], skip_special_tokens=True).strip())
+            txt_queries_ep[i].append(
+                tokenizer.decode(queries[i], skip_special_tokens=True).strip()
+            )
 
             # Take step in the environment
             text_obs, reward, done = envs[i].step(actions[i])
@@ -168,53 +176,83 @@ def sample_batch(
                     rewards_by_env_id[key].append(final_reward if success else 0)
                     episode_lengths_by_env_id[key].append(episode_length)
                     num_invalid_actions_by_env_id[key].append(num_invalid_actions)
-                
+
                 if trajectory_rl and isinstance(trainer, BatchedTrajectoryPPOTrainer):
                     targets = trainer.compute_returns(
                         queries=queries_ep[i],
                         responses=responses_ep[i],
                         rewards=rewards_ep[i],
-                        dones=dones_ep[i]
+                        dones=dones_ep[i],
                     )
                     rewards_all.extend(targets)
                 else:
                     # Discount rewards if successful
                     if success:
                         for j in range(len(rewards_ep[i]) - 1):
-                            rewards_ep[i][j] = final_reward # add final reward to all previous rewards
+                            rewards_ep[i][
+                                j
+                            ] = final_reward  # add final reward to all previous rewards
                     rewards_all.extend(rewards_ep[i])
-                
+
                 # Append to global storage
                 queries_all.extend(queries_ep[i])
                 responses_all.extend(responses_ep[i])
-                
+
                 # Log query, response, and reward
-                logger.info(f"Env {i}: Query: {txt_queries_ep[i]}, Response: {txt_actions_ep[i]}, Reward: {rewards_ep[i]}")
+                logger.info(
+                    f"Env {i}: Query: {txt_queries_ep[i]}, Response: {txt_actions_ep[i]}, Reward: {rewards_ep[i]}"
+                )
 
                 # Reset environment, context, and per-environment storage
-                queries_ep[i], responses_ep[i], rewards_ep[i], dones_ep[i], contexts[i] = [], [], [], [], []
-                mission, text_obs = envs[i].reset() 
+                (
+                    queries_ep[i],
+                    responses_ep[i],
+                    rewards_ep[i],
+                    dones_ep[i],
+                    contexts[i],
+                ) = ([], [], [], [], [])
+                mission, text_obs = envs[i].reset()
                 system_prompt = system_prompt_template.replace("{goal}", mission)
                 contexts[i].append({"role": "system", "content": system_prompt})
                 contexts[i].append({"role": "user", "content": text_obs})
-    
+
     # Convert rewards to individual tensors
-    rewards_all = [torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all]
-    
+    rewards_all = [
+        torch.tensor(reward, dtype=torch.float32).to(device) for reward in rewards_all
+    ]
+
     # Package stats
     stats = {}
     stats["total_generate_time"] = total_generate_time
     for env_id in possible_env_ids:
-        success_rate = sum(success_by_env_id[env_id]) / len(success_by_env_id[env_id]) if len(success_by_env_id[env_id]) > 0 else 0
-        avg_reward = sum(rewards_by_env_id[env_id]) / len(rewards_by_env_id[env_id]) if len(rewards_by_env_id[env_id]) > 0 else 0
-        avg_episode_length = sum(episode_lengths_by_env_id[env_id]) / len(episode_lengths_by_env_id[env_id]) if len(episode_lengths_by_env_id[env_id]) > 0 else 0
-        avg_invalid_actions = sum(num_invalid_actions_by_env_id[env_id]) / len(num_invalid_actions_by_env_id[env_id]) if len(num_invalid_actions_by_env_id[env_id]) > 0 else 0
+        success_rate = (
+            sum(success_by_env_id[env_id]) / len(success_by_env_id[env_id])
+            if len(success_by_env_id[env_id]) > 0
+            else 0
+        )
+        avg_reward = (
+            sum(rewards_by_env_id[env_id]) / len(rewards_by_env_id[env_id])
+            if len(rewards_by_env_id[env_id]) > 0
+            else 0
+        )
+        avg_episode_length = (
+            sum(episode_lengths_by_env_id[env_id])
+            / len(episode_lengths_by_env_id[env_id])
+            if len(episode_lengths_by_env_id[env_id]) > 0
+            else 0
+        )
+        avg_invalid_actions = (
+            sum(num_invalid_actions_by_env_id[env_id])
+            / len(num_invalid_actions_by_env_id[env_id])
+            if len(num_invalid_actions_by_env_id[env_id]) > 0
+            else 0
+        )
         stats[f"{env_id}_success_rate"] = success_rate
         stats[f"{env_id}_avg_reward"] = avg_reward
         stats[f"{env_id}_avg_episode_length"] = avg_episode_length
         stats[f"{env_id}_avg_invalid_actions"] = avg_invalid_actions
         stats[f"{env_id}_num_samples"] = len(success_by_env_id[env_id])
-        stats["success_count_total"] = episode_counter.total_success_count,
+        stats["success_count_total"] = (episode_counter.total_success_count,)
         stats["episode_count_total"] = episode_counter.total_episode_count
         stats["total_success_rate"] = episode_counter.get_total_success_rate()
 
@@ -224,7 +262,9 @@ def sample_batch(
 if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model_id = "meta-llama/Llama-3.2-3B-Instruct"  # "HuggingFaceTB/SmolLM2-135M-Instruct"
+    model_id = (
+        "meta-llama/Llama-3.2-3B-Instruct"  # "HuggingFaceTB/SmolLM2-135M-Instruct"
+    )
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     trainer = BatchedTrajectoryPPOTrainer(model=model)
     generation_kwargs = {
@@ -240,7 +280,7 @@ if __name__ == "__main__":
     batch_size = 8
     env_managers = [
         EnvManager(
-            env_ids, 
+            env_ids,
             invalid_action_penalty=-2,
             consecutive_invalid_actions_allowed=5,
         )
@@ -257,9 +297,10 @@ if __name__ == "__main__":
         batch_size=batch_size,
         context_window=context_window,
         reasoning_flag=False,
-        trajectory_rl=False
+        trajectory_rl=False,
     )
     elapsed_time = time.time() - start_time
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
     from pprint import pprint
+
     pprint(f"Stats: {stats}")
