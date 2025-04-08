@@ -255,8 +255,11 @@ def evaluate_models(
     return results
 
 # Example usage
+
+# Initialize wandb project and name for logging
 wandb.init(project="Evaluation", name="llama-32-3b-eval")
 
+# Define the models you want to evaluate, can be multiple models
 models_info = [{
     'model': AutoModelForCausalLM.from_pretrained(
         "meta-llama/Llama-3.2-3B-Instruct",
@@ -269,7 +272,10 @@ models_info = [{
     ),
     'name': 'llama-3.2-3b'
 }]
+
+# Define the environments you want to evaluate on
 env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0", "BabyAI-Open-v0", "BabyAI-PutNext-v0", "BabyAI-PickUpSeqGoTo-v0"]
+
 
 # Set the padding token
 for model_info in models_info:
