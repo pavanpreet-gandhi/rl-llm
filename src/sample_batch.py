@@ -9,6 +9,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import AutoModelForCausalLMWithValueHead
 from TrajactoryPPOTrainer import log_memory, BatchedTrajectoryPPOTrainer
 from trl import PPOTrainer, PPOConfig
+import re
 
 
 class EpisodeCounter:
@@ -63,10 +64,22 @@ def sample_batch(
     if logger is None:
         print("train logger is None")
 
+    # remove the cut off / today date from the chat template NOT WORKING
     if tokenizer.chat_template:
+        # print("=== BEFORE ===")
+        # print(tokenizer.chat_template)
+        a = tokenizer.chat_template
+        # Remove the literal Jinja2 lines that print those date strings
         tokenizer.chat_template = tokenizer.chat_template.replace(
-            "Cutting Knowledge Date: {{ cutoff }}\nToday Date: {{ today }}\n\n", ""
+            '{{- "Cutting Knowledge Date: December 2023\\n" }}\n', ''
         )
+        tokenizer.chat_template = tokenizer.chat_template.replace(
+            '{{- "Today Date: " + date_string + "\\n\\n" }}\n', ''
+        )
+        # breakpoint()
+        # print("=== AFTER ===")
+        # print(tokenizer.chat_template)
+
     # Setup
     num_envs = len(envs)
     system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
@@ -265,6 +278,8 @@ if __name__ == "__main__":
     model_id = (
         "meta-llama/Llama-3.2-3B-Instruct"  # "HuggingFaceTB/SmolLM2-135M-Instruct"
     )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id)    
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     trainer = BatchedTrajectoryPPOTrainer(model=model)
     generation_kwargs = {
@@ -290,7 +305,7 @@ if __name__ == "__main__":
     start_time = time.time()
     queries, responses, rewards, stats = sample_batch(
         envs=env_managers,
-        tokenizer=AutoTokenizer.from_pretrained(model_id),
+        tokenizer=tokenizer,
         trainer=trainer,
         generation_kwargs=generation_kwargs,
         device=device,
