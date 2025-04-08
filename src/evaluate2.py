@@ -3,159 +3,157 @@ import numpy as np
 import torch
 import wandb
 import gym
+import time
 import matplotlib.pyplot as plt
 from env_manager import EnvManager
 import babyai_text
 import utils
 from peft import PeftModel, PeftConfig
-from evaluate2 import evaluate_models
 from typing import Dict, Any, List, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from src import EnvManager, sample_batch
 babyai_text.register_levels(__name__, globals())
-
-
 
 # Evaluation function to evaluate a model on a specific environment
 def evaluate(
-    model: torch.nn.Module, # The PyTorch model to evaluate
-    tokenizer, # Tokenizer for processing input
-    generation_kwargs: Dict[str, Any], # Dictionary of generation parameters
-    num_episodes: int, # Number of episodes to evaluate
-    env_id: str, # The environment ID
-    env_kwargs: Dict[str, Any] = {}, # Additional environment arguments
-    num_envs: int = 4, # Number of parallel environments
-    context_window: int = 5, # Context window size
-    seed_offset: int = 1000, # Offset for random seed
-) -> Dict[str, float]: # Dictionary to store evaluation metrics
-    
-    print(f"Evaluating {env_id} with {num_episodes} episodes...")
+    model: torch.nn.Module,
+    tokenizer,
+    env_id: str,
+    context_window: int,
+    num_envs: int = 4,
+    num_batches: int = 10,
+    batch_size: int = 128,
+    reasoning_flag: bool = False,
+    generation_kwargs: dict = None,
+    device: torch.device = None,
+    invalid_action_penalty: float = -2,
+    consecutive_invalid_actions_allowed: int = 5,
+    log_to_wandb: bool = True,
+    model_name: str = "model",
+    step_offset: int = 0,
+) -> Dict[str, float]:
+    """
+    Evaluates a model on a specific environment with batch-based sampling, matching baseline config.
 
-    # Use cuda if possible
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    Args:
+        model (torch.nn.Module): The PyTorch model to evaluate;
+        tokenizer: Tokenizer for processing input;
+        env_id (str): The environment ID;
+        context_window (int): Size of the context window;
+        num_envs (int): Number of parallel environments;
+        num_batches (int): Number of batches to evaluate;
+        batch_size (int): Batch size for sampling;
+        reasoning_flag (bool): Whether to use reasoning ;
+        generation_kwargs (dict, optional): Dictionary of generation parameters;
+        device (torch.device, optional): Device to run on;
+        invalid_action_penalty (float): Penalty for invalid actions;
+        consecutive_invalid_actions_allowed (int): Max consecutive invalid actions;
+        log_to_wandb (bool): Whether to log to Weights & Biases;
+        model_name (str): Name of the model for logging;
+        step_offset (int): Offset for step numbering in wandb.
+
+    Returns:
+        Dict[str, float]: Dictionary with evaluation metrics.
+    """
+    print(f"Evaluating {env_id} with {num_batches} batches...")
+
+    # Set default generation_kwargs if not provided
+    if generation_kwargs is None:
+        generation_kwargs = {
+            "max_new_tokens": 20,
+            "do_sample": True,
+            "top_k": 10,
+            "top_p": 0.95,
+            "temperature": 0.8,
+        }
+
+    # Set default device if not provided
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Initialize parallel environments
     try:
-        eval_env_managers = [
-            EnvManager(gym.make(env_id, seed=i + seed_offset, **env_kwargs))
-            for i in range(num_envs)
+        envs = [
+            EnvManager(
+                [env_id],
+                invalid_action_penalty=invalid_action_penalty,
+                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+            ) for _ in range(num_envs)
         ]
     except Exception as e:
         print(f"Failed to initialize environments for {env_id}: {e}")
         raise
 
-    system_prompt_template = utils.get_system_prompt()
-    contexts: List[List[Dict[str, str]]] = [[] for _ in range(num_envs)]
-    missions, text_obss = zip(*[env.reset() for env in eval_env_managers])
+    # Lists to collect metrics across batches
+    total_times = []
+    total_generate_times = []
+    num_episodes_per_batch = []
+    successs = []
+    rewardss = []
+    episode_lengths = []
+    num_invalid_actions = []
 
-    # Initialize conversation contexts
-    for i, (context, mission, text_obs) in enumerate(zip(contexts, missions, text_obss)):
-        system_prompt = system_prompt_template.replace("{goal}", mission)
-        context.append({"role": "system", "content": system_prompt})
-        context.append({"role": "user", "content": text_obs})
-
-    episode_stats = []
-    current_episode_reward = [0.0] * num_envs
-    current_episode_steps = [0] * num_envs
-    current_episode_invalid_actions = [0] * num_envs
-    valid_actions = set(utils.text_to_action.keys())
-
-    # Step until we gather num_episodes total across all envs
-    while len(episode_stats) < num_episodes:
-        query_tensors_list = []
-        for context in contexts:
-            # Convert context -> token ids for the model
-            input_ids = tokenizer.apply_chat_template(
-                context, return_tensors="pt", add_generation_prompt=True
-            ).squeeze(0)
-            query_tensors_list.append(input_ids)
-
-        # Pad all queries in this step
-        encoded = tokenizer.pad({"input_ids": query_tensors_list}, 
-                                padding=True, return_tensors="pt").to(device)
-        attention_mask = encoded["attention_mask"]
-
-        # Generate step outputs
-        response_tensors_step = model.generate(
-            input_ids=encoded["input_ids"],
-            attention_mask=attention_mask,
-            **generation_kwargs,
+    # Run batches
+    for batch_idx in range(num_batches):
+        start_time = time.time()
+        queries, responses, rewards, stats, running_stats = sample_batch(
+            envs=envs,
+            tokenizer=tokenizer,
+            model=model,
+            generation_kwargs=generation_kwargs,
+            device=device,
+            batch_size=batch_size,
+            context_window=context_window,
+            reasoning_flag=reasoning_flag
         )
+        end_time = time.time()
+        batch_time = end_time - start_time
 
-        # For each environment, decode only the newly generated tokens
-        generated_ids = [
-            resp[len(enc):]  # slice off the prompt portion
-            for resp, enc in zip(response_tensors_step, encoded["input_ids"])
-        ]
-        response_texts_step = [
-            tokenizer.decode(ids, skip_special_tokens=True).strip()
-            for ids in generated_ids
-        ]
+        # Collect batch-level metrics
+        total_times.append(batch_time)
+        total_generate_times.append(stats["total_generate_time"])
+        num_episodes = len(running_stats['success'][env_id])
+        num_episodes_per_batch.append(num_episodes)
 
-        # Map raw text outputs -> single action from valid actions, defaulting to "done"
-        actions = []
-        for response_text in response_texts_step:
-            # A naive approach: pick first valid action found in the text
-            action = next((act for act in valid_actions if act in response_text), "done")
-            actions.append(action)
+        # Aggregate per-episode metrics
+        batch_success = running_stats['success'][env_id]
+        batch_rewards = running_stats['rewards'][env_id]
+        batch_lengths = running_stats['episode_lengths'][env_id]
+        batch_invalids = running_stats['num_invalid_actions'][env_id]
 
-        # Step in each environment with the chosen action
-        for i, (env, action) in enumerate(zip(eval_env_managers, actions)):
-            text_obs, reward, done = env.step(action)
-            current_episode_reward[i] += reward
-            current_episode_steps[i] += 1
-            if action not in valid_actions:
-                current_episode_invalid_actions[i] += 1
+        successs.extend(batch_success)
+        rewardss.extend(batch_rewards)
+        episode_lengths.extend(batch_lengths)
+        num_invalid_actions.extend(batch_invalids)
 
-            # Append the model's action + next user observation to context
-            contexts[i].append({"role": "assistant", "content": action})
-            contexts[i].append({"role": "user", "content": text_obs})
-
-            # Aggressive context trimming
-            max_messages = min(2 * context_window, 10)
-            if len(contexts[i]) > max_messages:
-                contexts[i] = contexts[i][-max_messages:]
-
-            # If environment is done, log episode stats and reset
-            if done:
-                success = 1 if reward > 0 else 0
-                episode_stats.append({
-                    "success": success,
-                    "total_reward": current_episode_reward[i],
-                    "steps": current_episode_steps[i],
-                    "invalid_actions": current_episode_invalid_actions[i],
-                })
-
-                # Reset counters
-                current_episode_reward[i] = 0.0
-                current_episode_steps[i] = 0
-                current_episode_invalid_actions[i] = 0
-
-                # Reset environment + context
-                mission, text_obs = env.reset()
-                system_prompt = system_prompt_template.replace("{goal}", mission)
-                contexts[i] = [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": text_obs},
-                ]
+        # Log per-batch metrics to wandb
+        if log_to_wandb:
+            batch_step = step_offset + batch_idx
+            wandb.log({
+                f"{model_name}/{env_id}/batch/success_rate": sum(batch_success) / len(batch_success) if batch_success else 0,
+                f"{model_name}/{env_id}/batch/avg_reward": sum(batch_rewards) / len(batch_rewards) if batch_rewards else 0,
+                f"{model_name}/{env_id}/batch/avg_length": sum(batch_lengths) / len(batch_lengths) if batch_lengths else 0,
+                f"{model_name}/{env_id}/batch/avg_invalid": sum(batch_invalids) / len(batch_invalids) if batch_invalids else 0,
+                f"{model_name}/{env_id}/batch/time": batch_time,
+                f"{model_name}/{env_id}/batch/generate_time": stats["total_generate_time"],
+                f"{model_name}/{env_id}/running/success_rate": sum(successs) / len(successs) if successs else 0,
+                f"{model_name}/{env_id}/running/avg_reward": sum(rewardss) / len(rewardss) if rewardss else 0,
+                f"{model_name}/{env_id}/running/avg_invalid": sum(num_invalid_actions) / len(num_invalid_actions) if num_invalid_actions else 0,
+            }, step=batch_step)
 
     # Compute summary metrics
-    success_rate = np.mean([stat["success"] for stat in episode_stats])
-    avg_reward = np.mean([stat["total_reward"] for stat in episode_stats])
-    avg_steps = np.mean([stat["steps"] for stat in episode_stats])
-    total_invalid_actions = sum(stat["invalid_actions"] for stat in episode_stats)
-    total_actions = sum(stat["steps"] for stat in episode_stats)
-    invalid_action_rate = total_invalid_actions / total_actions if total_actions > 0 else 0.0
-    successful_episodes = [s for s in episode_stats if s["success"] == 1]
-    avg_steps_to_success = (
-        np.mean([s["steps"] for s in successful_episodes]) if successful_episodes else float("nan")
-    )
-
     metrics = {
-        "success_rate": success_rate,
-        "avg_reward": avg_reward,
-        "avg_steps": avg_steps,
-        "invalid_action_rate": invalid_action_rate,
-        "avg_steps_to_success": avg_steps_to_success,
+        "num_episodes": sum(num_episodes_per_batch),
+        "success_rate": sum(successs) / len(successs) if successs else 0,
+        "avg_reward": sum(rewardss) / len(rewardss) if rewardss else 0,
+        "avg_steps": sum(episode_lengths) / len(episode_lengths) if episode_lengths else 0,
+        "invalid_action_rate": sum(num_invalid_actions) / len(num_invalid_actions) if num_invalid_actions else 0,
+        "avg_steps_to_success": (
+            sum([length for length, success in zip(episode_lengths, successs) if success]) / 
+            sum(successs) if sum(successs) > 0 else float("nan")
+        ),
+        "avg_total_time": sum(total_times) / len(total_times),
+        "avg_generate_time": sum(total_generate_times) / len(total_generate_times),
     }
     return metrics
 
@@ -163,120 +161,133 @@ def evaluate(
 def evaluate_models(
     models_info: List[Dict[str, Any]],
     env_ids: List[str],
-    num_episodes: int = 10,
-    generation_kwargs: Dict[str, Any] = None,
-    env_kwargs: Dict[str, Any] = {},
+    context_windows: List[int] = [1, 2, 3, 4, 5],
     num_envs: int = 4,
-    context_window: int = 5,
-    seed_offset: int = 1000,
-    step: int = None,
-    log_to_wandb: bool = False,
-) -> Dict[str, Dict[str, Dict[str, float]]]:
+    num_batches: int = 3,
+    batch_size: int = 128,
+    reasoning_flag: bool = False,
+    generation_kwargs: dict = None,
+    device: torch.device = None,
+    invalid_action_penalty: float = -2,
+    consecutive_invalid_actions_allowed: int = 5,
+    log_to_wandb: bool = True,
+    step_offset: int = 0,
+) -> Dict[str, Dict[str, Dict[int, Dict[str, float]]]]:
+    """
+    Evaluates multiple models on multiple environments with varying context windows.
+
+    Args:
+        models_info (List[Dict[str, Any]]): List of dicts with 'model', 'tokenizer', and 'name';
+        env_ids (List[str]): List of environment IDsl;
+        context_windows (List[int]): List of context window sizes;
+        num_envs (int): Number of parallel environments;
+        num_batches (int): Number of batches to run;
+        batch_size (int): Batch size for sampling;
+        reasoning_flag (bool): Whether to use reasoning;
+        generation_kwargs (dict, optional): Generation parameters;
+        device (torch.device, optional): Device to run on;
+        invalid_action_penalty (float): Penalty for invalid actions;
+        consecutive_invalid_actions_allowed (int): Max consecutive invalid actions;
+        log_to_wandb (bool): Whether to log to Weights & Biases;
+        step_offset (int): Starting step offset for wandb logging.
+
+    Returns:
+        Dict[str, Dict[str, Dict[int, Dict[str, float]]]]: Nested results {model: {env: {context: metrics}}}.
+    """
     if generation_kwargs is None:
         generation_kwargs = {
-            "max_new_tokens": 3,
-            "do_sample": False,
-            "repetition_penalty": 1.0,
+            "max_new_tokens": 20,
+            "do_sample": True,
+            "top_k": 10,
+            "top_p": 0.95,
+            "temperature": 0.8,
         }
+
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     results = {}
-    
+    current_step = step_offset
+
     for model_info in models_info:
         model = model_info['model']
         tokenizer = model_info['tokenizer']
         model_name = model_info['name']
-        
-        print(f"\n=== Evaluating model: {model_name} ===")
-        model_results = {}
-        
+        results[model_name] = {}
+
         for env_id in env_ids:
-            print(f"  Evaluating on environment: {env_id}")
-            metrics = evaluate(
-                model=model,
-                tokenizer=tokenizer,
-                generation_kwargs=generation_kwargs,
-                num_episodes=num_episodes,
-                env_id=env_id,
-                env_kwargs=env_kwargs,
-                num_envs=num_envs,
-                context_window=context_window,
-                seed_offset=seed_offset,
-            )
-            model_results[env_id] = metrics
-            
-            # Log to wandb if requested
-            if log_to_wandb:
-                for metric_name, value in metrics.items():
-                    wandb.log({
-                        f"eval/{model_name}/{env_id}/{metric_name}": value
-                    }, step=step)
-                    
-            # Print results
-            for k, v in metrics.items():
-                print(f"    {k}: {v:.4f}")
-                
+            results[model_name][env_id] = {}
+            for context_window in context_windows:
+                print(f"\n=== Evaluating model: {model_name} on {env_id} with context window: {context_window} ===")
+                metrics = evaluate(
+                    model=model,
+                    tokenizer=tokenizer,
+                    env_id=env_id,
+                    context_window=context_window,
+                    num_envs=num_envs,
+                    num_batches=num_batches,
+                    batch_size=batch_size,
+                    reasoning_flag=reasoning_flag,
+                    generation_kwargs=generation_kwargs,
+                    device=device,
+                    invalid_action_penalty=invalid_action_penalty,
+                    consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+                    log_to_wandb=log_to_wandb,
+                    model_name=model_name,
+                    step_offset=current_step,
+                )
+                results[model_name][env_id][context_window] = metrics
+
+                # Log summary metrics to wandb
+                if log_to_wandb:
+                    for metric_name, value in metrics.items():
+                        wandb.log({
+                            f"eval/{model_name}/{env_id}/ctx{context_window}/{metric_name}": value
+                        }, step=current_step + num_batches)
+
+                # Print results
+                for k, v in metrics.items():
+                    print(f"    {k}: {v:.4f}")
+
+                # Increment step offset for the next evaluation
+                current_step += num_batches
+
         results[model_name] = model_results
     
     return results
 
 # Example usage
+wandb.init(project="Evaluation", name="peft-model-eval")
 
-# Initialize wandb (optional)
-wandb.init(project="babyai-ppo-evaluation", name="peft-model-eval")
-
-# Load model
-checkpoint = "pavanpreet-gandhi/babyai-ppo-2025-03-30_11-36-26"
-peft_config = PeftConfig.from_pretrained(checkpoint)
-
-# Get tokenizer from base model
-tokenizer = AutoTokenizer.from_pretrained(
-    peft_config.base_model_name_or_path, 
-    padding_side="left"
-)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-# Load base model and apply PEFT adapter
-base_model = AutoModelForCausalLM.from_pretrained(
-    peft_config.base_model_name_or_path,
-    torch_dtype=torch.bfloat16,
-    device_map="cuda",
-)
-model = PeftModel.from_pretrained(base_model, checkpoint)
-model.eval()
-
-# Define evaluation environment(s)
-env_ids = ["BabyAI-GoToObj-v0", "BabyAI-Pickup-v0"]
-
-# Configure generation parameters
-generation_kwargs = {
-    "max_new_tokens": 20,
-    "do_sample": True,
-    "top_k": 10,
-    "top_p": 0.95,
-    "temperature": 0.8
-}
-
-# Prepare model info
 models_info = [{
-    'model': model,
-    'tokenizer': tokenizer,
+    'model': AutoModelForCausalLM.from_pretrained(
+        "pavanpreet-gandhi/babyai-ppo-2025-03-30_11-36-26",
+        torch_dtype=torch.bfloat16,
+        device_map="cuda",
+    ),
+    'tokenizer': AutoTokenizer.from_pretrained(
+        "pavanpreet-gandhi/babyai-ppo-2025-03-30_11-36-26",
+        padding_side="left"
+    ),
     'name': 'babyai-ppo'
 }]
+env_ids = ["BabyAI-GoToObj-v0"]
 
-# Run evaluation
+# Adjust parameters if needed HERE
 results = evaluate_models(
     models_info=models_info,
     env_ids=env_ids,
-    num_episodes=50,  # More episodes for robust evaluation
-    generation_kwargs=generation_kwargs,
-    log_to_wandb=True,
-    step=0  # Use appropriate step if tracking training progress
+    context_windows=[3],
+    num_batches = 3
 )
 
 # Print summary
 print("\n=== Evaluation Summary ===")
 for model_name, env_results in results.items():
-    for env_id, metrics in env_results.items():
-        print(f"{model_name} on {env_id}:")
-        for metric_name, value in metrics.items():
-            print(f"  {metric_name}: {value:.4f}")
+    for env_id, context_results in env_results.items():
+        for context_window, metrics in context_results.items():
+            print(f"{model_name} on {env_id} with context {context_window}:")
+            for metric_name, value in metrics.items():
+                print(f"  {metric_name}: {value:.4f}")
+
+wandb.finish()
