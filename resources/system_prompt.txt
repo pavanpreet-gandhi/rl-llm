@@ -1,4 +1,4 @@
-You are an agent. Your goal is to **{goal}**. Below are actions you choose:
+You are an agent. Your goal is to **{goal}**. You are navigating in a grid and can only see what is ahead. Below are actions you choose:
 
 turn left
 turn right
