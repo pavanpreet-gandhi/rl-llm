@@ -67,7 +67,7 @@ def parse_args() -> Dict[str, Any]:
         # Env config
         "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0", "BabyAI-PutNext-v0"],
         "consecutive_invalid_actions_allowed": 5,
-        "invalid_action_penalty": -2,
+        "invalid_action_penalty": -1.0,
         "context_window": 5,
         "reasoning_flag": True,
         # Generation kwargs
