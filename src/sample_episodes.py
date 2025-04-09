@@ -129,16 +129,10 @@ def sample_episodes(
     # Store stats
     stats = {}
     stats["total_generate_time"] = total_generate_time
-    for env_id in possible_env_ids:
-        success_rate = sum(success_by_env_id[env_id]) / len(success_by_env_id[env_id]) if len(success_by_env_id[env_id]) > 0 else 0
-        avg_reward = sum(rewards_by_env_id[env_id]) / len(rewards_by_env_id[env_id]) if len(rewards_by_env_id[env_id]) > 0 else 0
-        avg_episode_length = sum(episode_lengths_by_env_id[env_id]) / len(episode_lengths_by_env_id[env_id]) if len(episode_lengths_by_env_id[env_id]) > 0 else 0
-        avg_invalid_actions = sum(num_invalid_actions_by_env_id[env_id]) / len(num_invalid_actions_by_env_id[env_id]) if len(num_invalid_actions_by_env_id[env_id]) > 0 else 0
-        stats[f"{env_id}_success_rate"] = success_rate
-        stats[f"{env_id}_avg_reward"] = avg_reward
-        stats[f"{env_id}_avg_episode_length"] = avg_episode_length
-        stats[f"{env_id}_avg_invalid_actions"] = avg_invalid_actions
-        stats[f"{env_id}_num_samples"] = len(success_by_env_id[env_id])
+    stats["success"] = success_by_env_id["all"]
+    stats["rewards"] = rewards_by_env_id["all"]
+    stats["episode_lengths"] = episode_lengths_by_env_id["all"]
+    stats["num_invalid_actions"] = num_invalid_actions_by_env_id["all"]
 
     return stats
 
