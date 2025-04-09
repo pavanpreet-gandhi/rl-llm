@@ -34,44 +34,47 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "delete-me",  # TODO: "babyai-ppo-experiments"
-        "experiment_name": "mix_5_no_50_0.9_0.7", #"mix_5_no_reason_50_0.9_0.7",
+        "project_name": "babyai-classical-ppo-prefinal-experiments",
+        "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), # TODO
         "entity": "OE_2025",
-        "push_to_hub": True, # TODO: True
-        "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
+        "push_to_hub": True,
+        "hub_model_id": None,  # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
-        "save_every": 10,  # TODO: 10
+        "save_every": 10,
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "Heisenger/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
+        "pretrained_dir": None,  # Add path for the pretrained model "your-hf-username/your-model-repo"
         "load_checkpoint": None,
         # Training config
-        "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
         "separate_vhead": False, 
         "num_shared_layers": None,
-        "num_steps_train": 500,
-        "num_envs": 6,  # TODO: 4
+        "num_steps_train": 10_000,
+        "num_envs": 6,
         # PPO config
-        "batch_size": 128,  # TODO: 128
-        "mini_batch_size": 16,  # TODO: 64
+        "batch_size": 128,
+        "mini_batch_size": 16,
         "optimize_device_cache": False,
-        "early_stopping": True,
-        "learning_rate": 1.41e-5,
-        "kl_penalty" : "kl", # default "kl",
+        "learning_rate": 5e-6,
+        "kl_penalty" : "mse",  # Default "kl",
         "gamma_ppo": 1.0,
-        "lam_ppo": 1.0,
+        "lam_ppo": 0.98,
+        "adap_kl_ctrl": True,
+        "init_kl_coef": 0.2,
+        "target": 6.0,
+        "early_stopping": True,
+        "target_kl": 1.0, # stop early if we exceed this target by 50% in a single step
         # Env config
-        "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
+        "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0", "BabyAI-PutNext-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
-        "context_window": 5,  # Number of previous experiences to keep in context
+        "context_window": 5,
         "reasoning_flag": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 50,  # no top-k sampling
         "top_p": 0.9,  # no nucleus sampling
         "do_sample": True,  # yes, we want to sample
-        "max_new_tokens": 15,
         "temperature": 0.7,
         # PEFT config
         "use_peft": True,
@@ -178,18 +181,23 @@ def setup_training(args, logger: logging.Logger):
         kl_penalty=args.kl_penalty,
         gamma=args.gamma_ppo,
         lam=args.lam_ppo,
+        adap_kl_ctrl=args.adap_kl_ctrl,
+        init_kl_coef=args.init_kl_coef,
+        target=args.target,
+        target_kl=args.target_kl,
+        learning_rate=args.learning_rate,
     )
     trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lam)
     logger.info("Initialized PPO Trainer")
 
     # Set up generation kwargs for sampling trajectories
     generation_kwargs = {
-        "max_new_tokens": args.max_new_tokens,
         "do_sample": args.do_sample,
         "top_k": args.top_k,
         "top_p": args.top_p,
         "temperature": args.temperature,
         "pad_token_id": tokenizer.pad_token_id,
+        "min_length": args.min_length,
     }
     logger.info("Set up generation kwargs")
 
@@ -220,20 +228,7 @@ def train(args, logger: logging.Logger):
         setup_training(args, logger)
     )
     # Log key arguments to wandb
-    wandb.config.update(
-        {
-            "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "reasoning_flag": args.reasoning_flag,
-            "batch_size": args.batch_size,
-            "mini_batch_size": args.mini_batch_size,
-            "context_window": args.context_window,
-            "max_new_tokens": args.max_new_tokens,
-            "model_id": args.model_id,
-            "separate_vhead": args.separate_vhead,
-            "env_ids": args.env_ids,
-            "num_envs": args.num_envs,
-        }
-    )
+    wandb.config.update(vars(args))
     logger.info("Logged key arguments to wandb")
 
     episode_counter = EpisodeCounter()
