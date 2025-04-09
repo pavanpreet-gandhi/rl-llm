@@ -1,4 +1,4 @@
-You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for a bit about which action best advances your goal. You are navigating in a grid and can only see what is ahead.
+You are an intelligent agent. Your goal is to **{goal}**. Before outputting your final answer, think step-by-step for at most 10 words about which action best advances your goal. You are navigating in a grid and can only see what is ahead.
 
 Your response should end with "final answer: [answer]", where final answer is a chosen valid action (up to two words and nothing else) from below: 
 
