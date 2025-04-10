@@ -87,6 +87,7 @@ def parse_args() -> Dict[str, Any]:
         "trajactory_rl": True,
         "gamma": 0.9,
         "lam": 0.95,
+        "exclude_invalid_actions": True
     }
     args = SimpleNamespace(**args)  # same type as argparse would return
     return args
@@ -190,9 +191,7 @@ def setup_training(args, logger: logging.Logger):
         target_kl=args.target_kl,
         learning_rate=args.learning_rate,
     )
-    trainer = BatchedTrajectoryPPOTrainer(
-        config, model, ref_model, tokenizer, args.gamma, args.lam
-    )
+    trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lam, args.exclude_invalid_actions)
     logger.info("Initialized PPO Trainer")
 
     # Set up generation kwargs for sampling trajectories
