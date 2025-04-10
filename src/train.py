@@ -35,7 +35,7 @@ def parse_args() -> Dict[str, Any]:
     args = {
         # Logging config
         "project_name": "babyai-classical-ppo-prefinal-experiments",
-        "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), # TODO
+        "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),  # TODO
         "entity": "OE_2025",
         "push_to_hub": True,
         "hub_model_id": None,  # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
@@ -47,7 +47,7 @@ def parse_args() -> Dict[str, Any]:
         "load_checkpoint": None,
         # Training config
         "model_id": "meta-llama/Llama-3.2-3B-Instruct",  # "HuggingFaceTB/SmolLM2-135M-Instruct",
-        "separate_vhead": False, 
+        "separate_vhead": False,
         "num_shared_layers": None,
         "num_steps_train": 10_000,
         "num_envs": 6,
@@ -56,20 +56,21 @@ def parse_args() -> Dict[str, Any]:
         "mini_batch_size": 16,
         "optimize_device_cache": False,
         "learning_rate": 5e-6,
-        "kl_penalty" : "mse",  # Default "kl",
+        "kl_penalty": "mse",  # Default "kl",
         "gamma_ppo": 1.0,
         "lam_ppo": 0.98,
         "adap_kl_ctrl": True,
         "init_kl_coef": 0.2,
         "target": 6.0,
         "early_stopping": True,
-        "target_kl": 1.0, # stop early if we exceed this target by 50% in a single step
+        "target_kl": 1.0,  # stop early if we exceed this target by 50% in a single step
         # Env config
         "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0", "BabyAI-PutNext-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -1.0,
         "context_window": 5,
         "reasoning_flag": True,
+        "hide_invalid_action_in_context": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 50,  # no top-k sampling
@@ -135,7 +136,9 @@ def setup_training(args, logger: logging.Logger):
         # Load model and tokenizer from checkpoint
         pretrained_dir = args.pretrained_dir
         # Load the base model and tokenizer
-        model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir, torch_dtype=torch.bfloat16)
+        model = AutoModelForCausalLMWithValueHead.from_pretrained(
+            pretrained_dir, torch_dtype=torch.bfloat16
+        )
         if args.separate_vhead:
             hidden_size = model.config.hidden_size
             model.v_head = CustomValueHead(hidden_size)
@@ -187,7 +190,9 @@ def setup_training(args, logger: logging.Logger):
         target_kl=args.target_kl,
         learning_rate=args.learning_rate,
     )
-    trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lam)
+    trainer = BatchedTrajectoryPPOTrainer(
+        config, model, ref_model, tokenizer, args.gamma, args.lam
+    )
     logger.info("Initialized PPO Trainer")
 
     # Set up generation kwargs for sampling trajectories
@@ -273,7 +278,8 @@ def train(args, logger: logging.Logger):
             reasoning_flag=args.reasoning_flag,
             logger=train_logger,
             trajectory_rl=args.trajactory_rl,
-            episode_counter=episode_counter
+            episode_counter=episode_counter,
+            hide_invalid_action_in_context=args.hide_invalid_action_in_context,
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
@@ -342,7 +348,6 @@ def train(args, logger: logging.Logger):
                 except Exception as e:
                     logger.error(f"Failed to push to hub: {e}")
                     logger.info("Continuing with training")
-
 
 
 if __name__ == "__main__":
