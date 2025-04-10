@@ -172,11 +172,11 @@ def sample_batch(
             dones_ep[i].append(done)
 
             # Update context
-            if hide_invalid_action_in_context and (text_obs[0] == "Invalid"):
+            if hide_invalid_action_in_context and (text_obs[:7] == "Invalid"):
                 actions[i] = "Generated invalid action"
             contexts[i].append({"role": "assistant", "content": actions[i]})
             contexts[i].append({"role": "user", "content": text_obs})
-
+            # breakpoint()
             if done:
                 # Collect stats
                 final_reward = reward

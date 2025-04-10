@@ -34,7 +34,7 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "babyai-classical-ppo-prefinal-experiments",
+        "project_name": "delete-me", #"babyai-classical-ppo-prefinal-experiments",
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),  # TODO
         "entity": "OE_2025",
         "push_to_hub": True,
