@@ -174,8 +174,15 @@ def sample_batch(
             # Update context
             if hide_invalid_action_in_context and (text_obs[:7] == "Invalid"):
                 actions[i] = "Generated invalid action"
-            contexts[i].append({"role": "assistant", "content": actions[i]})
-            contexts[i].append({"role": "user", "content": text_obs})
+            if len(contexts[i]) > 2 and contexts[i][-1]['content'][:7] == "Invalid":
+                contexts[i][-2] = {"role": "assistant", "content": actions[i]}
+                contexts[i][-1] = {"role": "user", "content": text_obs}
+            else:
+                contexts[i].append({"role": "assistant", "content": actions[i]})
+                contexts[i].append({"role": "user", "content": text_obs})
+            # else:
+            #     contexts[i].append({"role": "assistant", "content": actions[i]})
+            #     contexts[i].append({"role": "user", "content": text_obs})
             # breakpoint()
             if done:
                 # Collect stats

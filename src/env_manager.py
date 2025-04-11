@@ -31,6 +31,7 @@ class EnvManager:
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         if self.reasoning_flag:
             issue_flag = True if "final answer:" not in text_action else False
+            text_action_len_flag = True if len(text_action.split()) < 10 else False
 
             text_action = text_action.split("final answer:")[-1].strip()
             action = utils.text_to_action.get(text_action, None)
@@ -47,6 +48,7 @@ class EnvManager:
                     self.consecutive_invalid_actions
                     >= self.consecutive_invalid_actions_allowed
                 )
+
             else:
                 obs, reward, done, info = self.env.step(action)
                 text_obs = "\n".join(info["descriptions"])
