@@ -9,12 +9,10 @@ import utils
 from peft import PeftModel, PeftConfig
 from typing import Dict, Any, List, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import AutoModelForCausalLMWithValueHead
-from src import sample_batch
 import logging
 import os
 
-# Suppress transformers logging to ERROR level
+# Suppress transformers logging to ERROR level to avoid unnecessary logging
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
 # Create directories for outputs if they don’t exist
@@ -23,10 +21,10 @@ os.makedirs("outputs/logs", exist_ok=True)
 
 babyai_text.register_levels(__name__, globals())
 
-# Modified evaluation function for fixed number of episodes
+# Evaluation function on a single model
 def evaluate(
-    model: torch.nn.Module,
-    tokenizer,
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
     env_id: str,
     context_window: int,
     num_envs: int = 4,
@@ -34,12 +32,12 @@ def evaluate(
     reasoning_flag: bool = False,
     generation_kwargs: dict = None,
     device: torch.device = None,
-    invalid_action_penalty: float = -2,
+    invalid_action_penalty: float = -0.1,  # Matches EnvManager default
     consecutive_invalid_actions_allowed: int = 5,
     model_name: str = "model",
     step_offset: int = 0,
 ) -> Dict[str, Any]:
-    print(f"Evaluating {env_id} with {num_episodes} episodes...")
+    print(f"Evaluating {model_name} on {env_id} with {num_episodes} episodes...")
 
     if generation_kwargs is None:
         generation_kwargs = {
@@ -54,18 +52,25 @@ def evaluate(
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Move model to device
+    model.to(device)
+    model.eval()
+
+    # Initialize environments
     try:
         envs = [
             EnvManager(
                 [env_id],
                 invalid_action_penalty=invalid_action_penalty,
                 consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+                reasoning_flag=reasoning_flag,
             ) for _ in range(num_envs)
         ]
     except Exception as e:
         print(f"Failed to initialize environments for {env_id}: {e}")
         raise
 
+    # Metrics storage
     total_times = []
     total_generate_times = []
     successs = []
@@ -76,115 +81,118 @@ def evaluate(
     running_avg_rewards = []
     episode_times = []
 
-    running_num_episodes = 0
-    running_success_sum = 0
-    running_reward_sum = 0
-    running_length_sum = 0
-    running_invalid_sum = 0
-    running_success_lengths = []
-
-    eval_start_time = time.time()
+    # Episode tracking
     episodes_completed = 0
-    current_step = step_offset
+    eval_start_time = time.time()
+    system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
 
     while episodes_completed < num_episodes:
-        start_time = time.time()
+        # Reset environments in parallel
+        batch_size = min(num_envs, num_episodes - episodes_completed)
+        active_envs = envs[:batch_size]
+        missions, obss = zip(*[env.reset() for env in active_envs])
+        contexts = [[] for _ in range(batch_size)]
+        steps = [0] * batch_size
+        rewards = [0.0] * batch_size
+        invalid_counts = [0] * batch_size
+        dones = [False] * batch_size
 
-        # Temporarily set transformers logging to ERROR to suppress warnings
-        logger = logging.getLogger("transformers")
-        original_level = logger.level
-        logger.setLevel(logging.ERROR)
+        # Initialize contexts
+        for i in range(batch_size):
+            system_prompt = system_prompt_template.replace("{goal}", missions[i])
+            contexts[i].append({"role": "system", "content": system_prompt})
+            contexts[i].append({"role": "user", "content": obss[i]})
 
-        # Calculate batch size to avoid overshooting episodes
-        remaining_episodes = num_episodes - episodes_completed
-        batch_size = min(128, remaining_episodes * 10)  # Estimate steps per episode
+        batch_start_time = time.time()
 
-        # Call sample_batch
-        queries, responses, rewards, stats = sample_batch(
-            envs=envs,
-            tokenizer=tokenizer,
-            model=model,
-            generation_kwargs=generation_kwargs,
-            device=device,
-            batch_size=batch_size,
-            context_window=context_window,
-            reasoning_flag=reasoning_flag
-        )
+        # Run episodes until all are done
+        while not all(dones):
+            generate_start_time = time.time()
 
-        # Restore the original logging level
-        logger.setLevel(original_level)
+            # Prepare queries
+            queries = []
+            for i, context in enumerate(contexts):
+                if not dones[i]:
+                    if len(context) > (2 * context_window + 1):
+                        clipped_context = [context[0]] + context[-(2 * context_window):]
+                    else:
+                        clipped_context = context
+                    query = tokenizer.apply_chat_template(
+                        clipped_context, return_tensors="pt", add_generation_prompt=True
+                    ).squeeze(0)
+                    queries.append(query)
+                else:
+                    queries.append(None)
 
-        end_time = time.time()
-        batch_time = end_time - start_time
-        elapsed_time = end_time - eval_start_time
-        episode_times.append(elapsed_time)
-        total_times.append(batch_time)
-        total_generate_times.append(stats.get("total_generate_time", 0.0))
+            # Batch and generate actions
+            active_indices = [i for i, q in enumerate(queries) if q is not None]
+            if not active_indices:
+                break
 
-        # Extract episode-level metrics from stats
-        batch_success = []
-        batch_rewards = []
-        batch_lengths = []
-        batch_invalids = []
+            active_queries = [queries[i] for i in active_indices]
+            queries_batched = torch.nn.utils.rnn.pad_sequence(
+                active_queries, batch_first=True, padding_value=tokenizer.pad_token_id
+            ).to(device)
 
-        # Get stats for the specific env_id
-        num_samples = stats.get(f"{env_id}_num_samples", 0)
-        if num_samples > 0:
-            # Estimate episode-level metrics
-            success_rate = stats.get(f"{env_id}_success_rate", 0)
-            avg_reward = stats.get(f"{env_id}_avg_reward", 0)
-            avg_length = stats.get(f"{env_id}_avg_episode_length", 0)
-            avg_invalids = stats.get(f"{env_id}_avg_invalid_actions", 0)
+            with torch.no_grad():
+                outputs = model.generate(
+                    input_ids=queries_batched,
+                    **generation_kwargs
+                )
+            responses = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
 
-            # Approximate episode-level data
-            for _ in range(num_samples):
-                # Success: 1 if random draw < success_rate, else 0
-                success = 1 if np.random.random() < success_rate else 0
-                batch_success.append(success)
-                # Reward: avg_reward if success, else 0
-                reward = avg_reward if success else 0
-                batch_rewards.append(reward)
-                # Length and invalids: use averages
-                batch_lengths.append(avg_length)
-                batch_invalids.append(avg_invalids)
+            generate_time = time.time() - generate_start_time
+            total_generate_times.append(generate_time)
 
-        num_new_episodes = min(num_samples, remaining_episodes)
-        episodes_completed += num_new_episodes
-        current_step += num_new_episodes
+            # Step environments
+            for idx, i in enumerate(active_indices):
+                raw_action = responses[idx].strip()
 
-        # Truncate to number of new episodes
-        batch_success = batch_success[:num_new_episodes]
-        batch_rewards = batch_rewards[:num_new_episodes]
-        batch_lengths = [int(l) for l in batch_lengths[:num_new_episodes]]  # Convert to int
-        batch_invalids = batch_invalids[:num_new_episodes]
+                # Handle reasoning_flag parsing
+                if reasoning_flag:
+                    if "final answer:" in raw_action:
+                        text_action = raw_action.split("final answer:")[-1].strip()
+                    else:
+                        text_action = raw_action  # Will be invalid due to format
+                else:
+                    text_action = raw_action
 
-        successs.extend(batch_success)
-        rewardss.extend(batch_rewards)
-        episode_lengths.extend(batch_lengths)
-        num_invalid_actions.extend(batch_invalids)
+                # Check action validity
+                action = utils.text_to_action.get(text_action, None)
+                is_invalid = action is None or (reasoning_flag and "final answer:" not in raw_action)
 
-        running_num_episodes += num_new_episodes
-        running_success_sum += sum(batch_success)
-        running_reward_sum += sum(batch_rewards)
-        running_length_sum += sum(batch_lengths)
-        running_invalid_sum += sum(batch_invalids)
-        running_success_lengths.extend([length for length, success in zip(batch_lengths, batch_success) if success])
+                # Step the environment
+                obs, reward, done = active_envs[i].step(raw_action)
+                steps[i] += 1
+                rewards[i] += reward
 
-        num_episodes_so_far = len(successs)
-        running_success_rate = running_success_sum / num_episodes_so_far if num_episodes_so_far > 0 else 0
-        running_success_rates.append(running_success_rate)
+                if is_invalid:
+                    invalid_counts[i] += 1
 
-        total_rewards_so_far = sum(rewardss)
-        running_avg_reward = total_rewards_so_far / num_episodes_so_far if num_episodes_so_far > 0 else 0
-        running_avg_rewards.append(running_avg_reward)
+                if not done:
+                    contexts[i].append({"role": "assistant", "content": raw_action})
+                    contexts[i].append({"role": "user", "content": obs})
+                else:
+                    dones[i] = True
+                    # Success if final reward > 0 (BabyAI sparse reward)
+                    success = 1 if reward > 0 else 0
+                    successs.append(success)
+                    rewardss.append(rewards[i])
+                    episode_lengths.append(steps[i])
+                    num_invalid_actions.append(invalid_counts[i])
+                    episodes_completed += 1
 
-    # Truncate lists to exact number of episodes
-    successs = successs[:num_episodes]
-    rewardss = rewardss[:num_episodes]
-    episode_lengths = episode_lengths[:num_episodes]
-    num_invalid_actions = num_invalid_actions[:num_episodes]
+                    # Update running metrics
+                    running_success_rate = sum(successs) / len(successs)
+                    running_avg_reward = sum(rewardss) / len(rewardss)
+                    running_success_rates.append(running_success_rate)
+                    running_avg_rewards.append(running_avg_reward)
+                    elapsed_time = time.time() - eval_start_time
+                    episode_times.append(elapsed_time)
 
-    # Compute standard deviations for the metrics
+        total_times.append(time.time() - batch_start_time)
+
+    # Compute final metrics
     metrics = {
         "num_episodes": len(successs),
         "success_rate": sum(successs) / len(successs) if successs else 0,
@@ -196,10 +204,9 @@ def evaluate(
         "invalid_action_rate": sum(num_invalid_actions) / len(num_invalid_actions) if num_invalid_actions else 0,
         "invalid_action_rate_std": np.std(num_invalid_actions) if num_invalid_actions else 0,
         "avg_steps_to_success": (
-            sum([length for length, success in zip(episode_lengths, successs) if success]) /
-            sum(successs) if sum(successs) > 0 else float("nan")
+            sum([l for l, s in zip(episode_lengths, successs) if s]) / sum(successs) if sum(successs) > 0 else float("nan")
         ),
-        "avg_steps_to_success_std": np.std(running_success_lengths) if running_success_lengths else float("nan"),
+        "avg_steps_to_success_std": np.std([l for l, s in zip(episode_lengths, successs) if s]) if sum(successs) > 0 else float("nan"),
         "avg_total_time": sum(total_times) / len(total_times),
         "avg_total_time_std": np.std(total_times) if total_times else 0,
         "avg_generate_time": sum(total_generate_times) / len(total_generate_times),
@@ -213,7 +220,7 @@ def evaluate(
         "episode_times": episode_times,
     }
 
-# Plotting function remains unchanged
+# Plotting function
 def plot_performance(
     env_ids: List[str],
     context_window: int,
@@ -249,7 +256,7 @@ def plot_performance(
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
 
-# Modified evaluate_models function
+# Evaluation function on mutliple models
 def evaluate_models(
     models_info: List[Dict[str, Any]],
     seen_env_ids: List[str],
@@ -259,7 +266,7 @@ def evaluate_models(
     num_episodes: int = 50,
     generation_kwargs: dict = None,
     device: torch.device = None,
-    invalid_action_penalty: float = -2,
+    invalid_action_penalty: float = -0.1,
     consecutive_invalid_actions_allowed: int = 5,
     step_offset: int = 0,
 ) -> Dict[str, Dict[str, Dict[int, Dict[str, Any]]]]:
@@ -288,7 +295,7 @@ def evaluate_models(
     if baseline_model_info is None:
         raise ValueError("Baseline (untrained) model not found in models_info.")
 
-    # Evaluate the baseline model on all environments
+    # Evaluate baseline model
     baseline_results = {"seen": {}, "unseen": {}}
     for env_id in seen_env_ids:
         baseline_results["seen"][env_id] = {}
@@ -334,7 +341,7 @@ def evaluate_models(
             baseline_results["unseen"][env_id][context_window] = result["final_metrics"]["success_rate"]
             current_step += num_episodes
 
-    # Evaluate each trained model
+    # Evaluate trained models
     for model_info in models_info:
         if "baseline" in model_info['name'].lower():
             continue
@@ -456,7 +463,7 @@ def evaluate_models(
 
     return results
 
-# Load baseline model once
+# Load baseline model
 baseline_model = AutoModelForCausalLM.from_pretrained(
     "meta-llama/Llama-3.2-3B-Instruct",
     torch_dtype=torch.bfloat16,
@@ -467,7 +474,7 @@ baseline_tokenizer = AutoTokenizer.from_pretrained(
     padding_side="left"
 )
 
-# Initialize models_info with the baseline model
+# Initialize models_info with raw baseline model
 models_info = [
     {
         'model': baseline_model,
@@ -479,22 +486,22 @@ models_info = [
 # Checkpoints
 checkpoints = [
     ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "3a698a6adce4838068348f97e87dafddbf05be2d"),  # Checkpoint 160
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4b4784ff36b04aa34cc3f84bf154c30e133c9a36"),  # Checkpoint 150
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c27ab0a7fbd204138b01ca6b38a20adfda0128e"),  # Checkpoint 140
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "169b7890e98134d71d14707751e55f7eee54507a"),  # Checkpoint 130
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0eb2d6751c2ba48a0d95302a10ee84f1b4ab274b"),  # Checkpoint 120
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "57c165bcb6db38a78b7d67846fbb2418041fca99"),  # Checkpoint 110
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0584ccf6786fc1733a7af991de032cf7dca00785"),  # Checkpoint 100
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c7fa7274f86f653a9db03aab81d2ab6e5a22d7f"),  # Checkpoint 90
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7f8b9386d2b27dba1484255e39eb82241e902c62"),  # Checkpoint 80
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "33952a7e415f6463b972e6273dc3019c4bf7f489"),  # Checkpoint 70
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "9d7f1d2930977248ba6a2b6f006c917b4f06df2a"),  # Checkpoint 60
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4275fb5ec80c9f84c03474aeedf0c81af8cf472e"),  # Checkpoint 50
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0c899f429c008150d05eb2d94f9b2f1e40933ecb"),  # Checkpoint 40
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d04ac0bcb78e7d803ad1d947e318b4e52b17080a"),  # Checkpoint 30
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d287a43a11c1c3ebd9e04016b4fdec66791cc323"),  # Checkpoint 20
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "67728556b8cff0b3c18556a26e62315216c1dd44"),  # Checkpoint 10
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0167cdea75d80598f4d674e14b4cb15f57a3ad96"),  # Initial commit
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4b4784ff36b04aa34cc3f84bf154c30e133c9a36"),  # Checkpoint 150
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c27ab0a7fbd204138b01ca6b38a20adfda0128e"),  # Checkpoint 140
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "169b7890e98134d71d14707751e55f7eee54507a"),  # Checkpoint 130
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0eb2d6751c2ba48a0d95302a10ee84f1b4ab274b"),  # Checkpoint 120
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "57c165bcb6db38a78b7d67846fbb2418041fca99"),  # Checkpoint 110
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0584ccf6786fc1733a7af991de032cf7dca00785"),  # Checkpoint 100
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c7fa7274f86f653a9db03aab81d2ab6e5a22d7f"),  # Checkpoint 90
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7f8b9386d2b27dba1484255e39eb82241e902c62"),  # Checkpoint 80
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "33952a7e415f6463b972e6273dc3019c4bf7f489"),  # Checkpoint 70
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "9d7f1d2930977248ba6a2b6f006c917b4f06df2a"),  # Checkpoint 60
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4275fb5ec80c9f84c03474aeedf0c81af8cf472e"),  # Checkpoint 50
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0c899f429c008150d05eb2d94f9b2f1e40933ecb"),  # Checkpoint 40
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d04ac0bcb78e7d803ad1d947e318b4e52b17080a"),  # Checkpoint 30
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d287a43a11c1c3ebd9e04016b4fdec66791cc323"),  # Checkpoint 20
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "67728556b8cff0b3c18556a26e62315216c1dd44"),  # Checkpoint 10
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0167cdea75d80598f4d674e14b4cb15f57a3ad96"),  # Initial commit
 ]
 
 # Add each checkpoint as a trained model
@@ -521,7 +528,7 @@ for model_info in models_info:
 seen_env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"]
 unseen_env_ids = ["BabyAI-Open-v0", "BabyAI-PutNext-v0", "BabyAI-PickUpSeqGoTo-v0"]
 
-# Modified example usage
+# Run evaluation
 results = evaluate_models(
     models_info=models_info,
     seen_env_ids=seen_env_ids,
@@ -530,7 +537,7 @@ results = evaluate_models(
     num_episodes=50,
 )
 
-# Modified summary logging
+# Summary logging
 summary_file = "outputs/logs/evaluation_summary.txt"
 with open(summary_file, "w") as f:
     f.write("=== Evaluation Summary ===\n")
