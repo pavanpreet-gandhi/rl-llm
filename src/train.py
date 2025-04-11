@@ -23,8 +23,9 @@ from huggingface_hub import HfApi, create_repo, hf_hub_download
 
 import utils
 from env_manager import EnvManager
-from sample_batch import sample_batch
+from sample_batch import sample_batch, EpisodeCounter
 from custom_value_head import CustomValueHead
+from TrajactoryPPOTrainer import BatchedTrajectoryPPOTrainer, log_memory
 
 
 def parse_args() -> Dict[str, Any]:
@@ -34,47 +35,54 @@ def parse_args() -> Dict[str, Any]:
     args = {
         # Logging config
         "project_name": "delete-me",  # TODO: "babyai-ppo-experiments"
-        "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+        "experiment_name": "mix_5_no_50_0.9_0.7", #"mix_5_no_reason_50_0.9_0.7",
         "entity": "OE_2025",
-        "push_to_hub": False, # TODO: True
+        "push_to_hub": True, # TODO: True
         "hub_model_id": None, # If None, will use f"{hf_username}/{args.project_name}-{args.experiment_name}"
         # Checkpoint config
         "save_every": 10,  # TODO: 10
         "checkpoint_dir": "checkpoints",
         # Load pretrained model
-        "pretrained_dir": "Heisenger/babyai-ppo-experiments-2025-04-02_16-47-48",  # add path for the pretrained model "your-hf-username/your-model-repo"
-        "load_checkpoint": False,
+        "pretrained_dir": "Heisenger/babyai-classical-ppo-experiments-2025-04-03_13-12-13",  # add path for the pretrained model "your-hf-username/your-model-repo"
+        "load_checkpoint": None,
         # Training config
-        "model_id": "HuggingFaceTB/SmolLM2-135M-Instruct", # "meta-llama/Llama-3.2-3B-Instruct",
+        "model_id": "meta-llama/Llama-3.2-3B-Instruct", # "HuggingFaceTB/SmolLM2-135M-Instruct", ,
         "separate_vhead": False, 
         "num_shared_layers": None,
-        "num_steps_train": 10_000,
-        "num_envs": 4,  # TODO: 4
+        "num_steps_train": 500,
+        "num_envs": 6,  # TODO: 4
         # PPO config
-        "batch_size": 4,  # TODO: 128
-        "mini_batch_size": 4,  # TODO: 64
+        "batch_size": 128,  # TODO: 128
+        "mini_batch_size": 16,  # TODO: 64
         "optimize_device_cache": False,
-        "early_stopping": False,
+        "early_stopping": True,
         "learning_rate": 1.41e-5,
+        "kl_penalty" : "kl", # default "kl",
+        "gamma_ppo": 1.0,
+        "lam_ppo": 1.0,
         # Env config
         "env_ids": ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"],
         "consecutive_invalid_actions_allowed": 5,
         "invalid_action_penalty": -2,
-        "context_window": 2,  # Number of previous experiences to keep in context
-        "reasoning_flag": False,
+        "context_window": 5,  # Number of previous experiences to keep in context
+        "reasoning_flag": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
-        "top_k": 0.0,  # no top-k sampling
-        "top_p": 1.0,  # no nucleus sampling
+        "top_k": 50,  # no top-k sampling
+        "top_p": 0.9,  # no nucleus sampling
         "do_sample": True,  # yes, we want to sample
         "max_new_tokens": 15,
-        "temperature": 0.8,
+        "temperature": 0.7,
         # PEFT config
         "use_peft": True,
         "lora_r": 32,
         "lora_alpha": 32,
         "lora_dropout": 0.05,
         "lora_bias": "none",
+        # RL config
+        "trajactory_rl": True,
+        "gamma": 0.9,
+        "lam": 0.95,
     }
     args = SimpleNamespace(**args)  # same type as argparse would return
     return args
@@ -124,7 +132,7 @@ def setup_training(args, logger: logging.Logger):
         # Load model and tokenizer from checkpoint
         pretrained_dir = args.pretrained_dir
         # Load the base model and tokenizer
-        model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir)
+        model = AutoModelForCausalLMWithValueHead.from_pretrained(pretrained_dir, torch_dtype=torch.bfloat16)
         if args.separate_vhead:
             hidden_size = model.config.hidden_size
             model.v_head = CustomValueHead(hidden_size)
@@ -134,7 +142,9 @@ def setup_training(args, logger: logging.Logger):
         value_head_path = hf_hub_download(
             repo_id=pretrained_dir, filename="value_head.bin"
         )
-        model.v_head.load_state_dict(torch.load(value_head_path))#.to(device).to(dtype=torch.bfloat16)
+        model.v_head.load_state_dict(
+            torch.load(value_head_path)
+        )  # .to(device).to(dtype=torch.bfloat16)
 
         logger.info(f"Loaded model and tokenizer from {pretrained_dir}")
 
@@ -147,7 +157,9 @@ def setup_training(args, logger: logging.Logger):
         ).to(device)
         if args.separate_vhead:
             hidden_size = model.config.hidden_size
-            model.v_head = CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
+            model.v_head = (
+                CustomValueHead(hidden_size).to(device).to(dtype=torch.bfloat16)
+            )
         logger.info("Loaded model and tokenizer from scratch")
 
     # Create reference model
@@ -163,8 +175,11 @@ def setup_training(args, logger: logging.Logger):
         is_peft_model=args.use_peft,
         exp_name=args.experiment_name,
         log_with="wandb",
+        kl_penalty=args.kl_penalty,
+        gamma=args.gamma_ppo,
+        lam=args.lam_ppo,
     )
-    trainer = PPOTrainer(config, model, ref_model, tokenizer)
+    trainer = BatchedTrajectoryPPOTrainer(config, model, ref_model, tokenizer, args.gamma, args.lam)
     logger.info("Initialized PPO Trainer")
 
     # Set up generation kwargs for sampling trajectories
@@ -174,7 +189,7 @@ def setup_training(args, logger: logging.Logger):
         "top_k": args.top_k,
         "top_p": args.top_p,
         "temperature": args.temperature,
-        "pad_token_id": tokenizer.eos_token_id,
+        "pad_token_id": tokenizer.pad_token_id,
     }
     logger.info("Set up generation kwargs")
 
@@ -229,8 +244,33 @@ def train(args, logger: logging.Logger):
     )
     logger.info("Logged key arguments to wandb")
 
+    episode_counter = EpisodeCounter()
     logger.info("STARTING TRAINING LOOP")
+
+    # Create logger for training
+    train_logger = logging.getLogger("train_logger")
+    train_logger.setLevel(logging.INFO)
+    # Remove any existing handlers to avoid duplicate logging
+    # Create a file handler to write logs to a file
+    train_log_file = "logs/training_logs.txt"
+    file_handler = logging.FileHandler(train_log_file)
+    file_handler.setLevel(logging.INFO)
+
+    # Create a formatter and add it to the handler
+    formatter = logging.Formatter("%(asctime)s - %(message)s")
+    file_handler.setFormatter(formatter)
+    train_logger.handlers = []  # Clear existing handlers
+    # Add only the file handler
+    train_logger.addHandler(file_handler)
+    # Ensure logs are not printed to the console
+    train_logger.propagate = False
+
+    # Add the handler to the logger
+    train_logger.addHandler(file_handler)
+    wandb.save(train_log_file)
+
     for step in tqdm(range(args.num_steps_train)):
+        train_logger.info(f"TRAINING STEP {step + 1} STARTED")
 
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")
@@ -238,12 +278,15 @@ def train(args, logger: logging.Logger):
         queries, responses, rewards, stats, running_stats = sample_batch(
             envs=env_managers,
             tokenizer=tokenizer,
-            model=trainer.model,
+            trainer=trainer,
             generation_kwargs=generation_kwargs,
             device=device,
             batch_size=args.batch_size,
             context_window=args.context_window,
             reasoning_flag=args.reasoning_flag,
+            logger=train_logger,
+            trajectory_rl=args.trajactory_rl,
+            episode_counter=episode_counter
         )
         sample_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"Sample batch time: {sample_time:.2f} seconds")
@@ -270,9 +313,11 @@ def train(args, logger: logging.Logger):
         rewards = [rewards[i] for i in indices]
 
         # Train step
+        log_memory(logger, "Before trainer step")
         start_time = datetime.now()
         trainer_stats = trainer.step(queries, responses, rewards)
         train_time = (datetime.now() - start_time).total_seconds()
+        log_memory(logger, "After trainer step")
         logger.info(f"Trainer step time: {train_time:.2f} seconds")
 
         # Add timing stats to wandb
@@ -286,6 +331,10 @@ def train(args, logger: logging.Logger):
         response = tokenizer.batch_decode(responses, skip_special_tokens=True)
         batch = {"query": query, "response": response}
         trainer.log_stats(stats, batch, rewards)
+
+        # Upload the training log file to wandb
+        train_logger.info("Uploaded training_logs.txt to wandb")
+        wandb.save("training_logs.txt")
 
         # Save checkpoint if needed
         if args.save_every > 0 and (step + 1) % args.save_every == 0:
@@ -317,6 +366,7 @@ def train(args, logger: logging.Logger):
                 except Exception as e:
                     logger.error(f"Failed to push to hub: {e}")
                     logger.info("Continuing with training")
+
 
 
 if __name__ == "__main__":
