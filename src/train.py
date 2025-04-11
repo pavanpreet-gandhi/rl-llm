@@ -34,7 +34,7 @@ def parse_args() -> Dict[str, Any]:
     """
     args = {
         # Logging config
-        "project_name": "delete-me", #"babyai-classical-ppo-prefinal-experiments",
+        "project_name": "babyai-classical-ppo-prefinal-experiments",
         "experiment_name": datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),  # TODO
         "entity": "OE_2025",
         "push_to_hub": True,
@@ -55,8 +55,8 @@ def parse_args() -> Dict[str, Any]:
         "batch_size": 128,
         "mini_batch_size": 16,
         "optimize_device_cache": False,
-        "learning_rate": 5e-6,
-        "kl_penalty": "mse",  # Default "kl",
+        "learning_rate": 1.41e-5,
+        "kl_penalty": "kl",  # Default "kl",
         "gamma_ppo": 1.0,
         "lam_ppo": 0.98,
         "adap_kl_ctrl": True,
@@ -71,6 +71,7 @@ def parse_args() -> Dict[str, Any]:
         "context_window": 5,
         "reasoning_flag": True,
         "hide_invalid_action_in_context": True,
+        "weighted_env_sampling": True,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 50,  # no top-k sampling
@@ -102,9 +103,11 @@ def setup_training(args, logger: logging.Logger):
     logger.info(f"Using device: {device}")
 
     # Set up environment managers
+    weights = [1.0 for _ in range(len(args.env_ids))]
     envs = [
         EnvManager(
             env_ids=args.env_ids,
+            weights=weights,
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
             reasoning_flag=args.reasoning_flag,
@@ -235,7 +238,7 @@ def train(args, logger: logging.Logger):
     wandb.config.update(vars(args))
     logger.info("Logged key arguments to wandb")
 
-    episode_counter = EpisodeCounter()
+    episode_counter = EpisodeCounter(args.env_ids)
     logger.info("STARTING TRAINING LOOP")
 
     # Create logger for training
@@ -262,6 +265,16 @@ def train(args, logger: logging.Logger):
 
     for step in tqdm(range(args.num_steps_train)):
         train_logger.info(f"TRAINING STEP {step + 1} STARTED")
+
+        # Sample envs with lower (batch) success rate more often
+        if args.weighted_env_sampling:
+            for env_manager in env_managers:
+                env_manager.set_weights(
+                    [1 - episode_counter.get_batch_success_rate(env_id) for env_id in args.env_ids]
+                )
+            logger.info(
+                f"Updated environment weights: {env_managers[0].weights}"
+            )
 
         # Collect experiences
         logger.info("COLLECTING EXPERIENCES...")

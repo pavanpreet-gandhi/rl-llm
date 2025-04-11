@@ -13,36 +13,54 @@ import re
 
 
 class EpisodeCounter:
-    def __init__(self):
-        self.last_episode = 0
+    def __init__(self, env_ids: List[str]):
         self.batch_count = 0
         self.total_success_count = 0
         self.total_episode_count = 0
         self.batch_success_count = 0
         self.batch_episode_count = 0
+        self.total_success_count_by_env_id = {env_id: 0 for env_id in env_ids}
+        self.total_episode_count_by_env_id = {env_id: 0 for env_id in env_ids}
+        self.batch_success_count_by_env_id = {env_id: 0 for env_id in env_ids}
+        self.batch_episode_count_by_env_id = {env_id: 0 for env_id in env_ids}
 
-    def increment(self, success: bool = False):
-        if success:
-            self.total_success_count += 1
-            self.batch_success_count += 1
+    def increment(self, success: bool = False, env_id = None):
+        self.total_success_count += 1 if success else 0
+        self.batch_success_count += 1 if success else 0
         self.total_episode_count += 1
         self.batch_episode_count += 1
+        if env_id is not None:
+            self.total_success_count_by_env_id[env_id] += 1 if success else 0
+            self.batch_success_count_by_env_id[env_id] += 1 if success else 0
+            self.total_episode_count_by_env_id[env_id] += 1
+            self.batch_episode_count_by_env_id[env_id] += 1
 
     def new_batch(self):
-        self.last_episode = self.total_episode_count
         self.batch_count += 1
         self.batch_success_count = 0
         self.batch_episode_count = 0
+        self.batch_success_count_by_env_id = {key: 0 for key in self.batch_success_count_by_env_id}
+        self.batch_episode_count_by_env_id = {key: 0 for key in self.batch_episode_count_by_env_id}
 
-    def get_batch_success_rate(self):
-        if self.batch_episode_count == 0:
-            return 0
-        return self.batch_success_count / self.batch_episode_count
+    def get_batch_success_rate(self, env_id = None):
+        if env_id is None:
+            if self.batch_episode_count == 0:
+                return 0
+            return self.batch_success_count / self.batch_episode_count
+        else:
+            if self.batch_episode_count_by_env_id[env_id] == 0:
+                return 0
+            return self.batch_success_count_by_env_id[env_id] / self.batch_episode_count_by_env_id[env_id]
 
-    def get_total_success_rate(self):
-        if self.total_episode_count == 0:
-            return 0
-        return self.total_success_count / self.total_episode_count
+    def get_total_success_rate(self, env_id = None):
+        if env_id is None:
+            if self.total_episode_count == 0:
+                return 0
+            return self.total_success_count / self.total_episode_count
+        else:
+            if self.total_episode_count_by_env_id[env_id] == 0:
+                return 0
+            return self.total_success_count_by_env_id[env_id] / self.total_episode_count_by_env_id[env_id]
 
 
 def sample_batch(
@@ -84,7 +102,8 @@ def sample_batch(
     # Setup
     num_envs = len(envs)
     system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
-    episode_counter = episode_counter or EpisodeCounter()
+    env_ids = envs[0].env_ids # assuming all envs have the same env_ids
+    episode_counter = episode_counter or EpisodeCounter(env_ids)
     episode_counter.new_batch()
     # Initialize global storage lists
     queries_all, responses_all, rewards_all = [], [], []
@@ -111,9 +130,7 @@ def sample_batch(
 
     # Variables to keep track of stats
     total_generate_time = 0
-    possible_env_ids = envs[0].env_ids + [
-        "all"
-    ]  # assuming all envs have the same env_ids
+    possible_env_ids = env_ids + ["all"]
     success_by_env_id = {env_id: [] for env_id in possible_env_ids}
     rewards_by_env_id = {env_id: [] for env_id in possible_env_ids}
     episode_lengths_by_env_id = {env_id: [] for env_id in possible_env_ids}
@@ -179,14 +196,14 @@ def sample_batch(
             # breakpoint()
             if done:
                 # Collect stats
+                env_id = envs[i].env_id
                 final_reward = reward
                 success = True if final_reward > 0 else False
-                episode_counter.increment(success=success)
+                episode_counter.increment(success=success, env_id=env_id)
                 episode_length = len(rewards_ep[i])
                 num_invalid_actions = sum([r < 0 for r in rewards_ep[i]])
 
                 # Store stats
-                env_id = envs[i].env_id
                 for key in [env_id, "all"]:
                     success_by_env_id[key].append(1 if success else 0)
                     rewards_by_env_id[key].append(final_reward if success else 0)

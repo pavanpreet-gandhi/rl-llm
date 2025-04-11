@@ -9,6 +9,7 @@ class EnvManager:
     def __init__(
         self,
         env_ids: List[str], 
+        weights: List[float] = None,  # Sampling weights for env_ids
         invalid_action_penalty: float = -0.1, 
         consecutive_invalid_actions_allowed: int = 5, 
         reasoning_flag: bool = False
@@ -18,9 +19,16 @@ class EnvManager:
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
         self.reasoning_flag = reasoning_flag
+        self.weights = weights
+    
+    def set_weights(self, weights: List[float]):
+        self.weights = weights
     
     def reset(self) -> Tuple[str, str]:
-        self.env_id = random.choice(self.env_ids)
+        if self.weights is None or all(w == 0 for w in self.weights):
+            self.env_id = random.choice(self.env_ids)
+        else:
+            self.env_id = random.choices(self.env_ids, weights=self.weights, k=1)[0]
         self.env = gym.make(self.env_id, disable_env_checker=True, num_dists=0)
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
