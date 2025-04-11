@@ -95,7 +95,7 @@ def evaluate(
         original_level = logger.level
         logger.setLevel(logging.ERROR)
 
-        queries, responses, rewards, stats, running_stats = sample_batch(
+        _, _, rewards, stats, running_stats = sample_batch(
             envs=envs,
             tokenizer=tokenizer,
             model=model,
@@ -144,42 +144,26 @@ def evaluate(
         running_avg_reward = total_rewards_so_far / num_episodes_so_far if num_episodes_so_far > 0 else 0
         running_avg_rewards.append(running_avg_reward)
 
-        # Log query-output pairs
-        decoded_queries = [tokenizer.decode(q, skip_special_tokens=True) if isinstance(q, torch.Tensor) else q for q in queries]
-        decoded_responses = [tokenizer.decode(r, skip_special_tokens=True) if isinstance(r, torch.Tensor) else r for r in responses]
-
-        query_response_pairs = []
-        for query, response in zip(decoded_queries, decoded_responses):
-            pair = f"Query: {query}\nOutput: {response}"
-            query_response_pairs.append(pair)
-
-        # Print to console
-        print(f"Step {batch_idx + step_offset} - Model: {model_name}, Env: {env_id}")
-        print("Query-Output Pairs:")
-        for pair in query_response_pairs:
-            print(pair)
-            print("-" * 50)
-
-        # Save to file
-        with open(f"outputs/logs/model_outputs_{model_name}_{env_id}.txt", "a") as f:
-            f.write(f"Step {batch_idx + step_offset} - Model: {model_name}, Env: {env_id}\n")
-            f.write("Query-Output Pairs:\n")
-            for pair in query_response_pairs:
-                f.write(pair + "\n")
-                f.write("-" * 50 + "\n")
-
+    # Compute standard deviations for the metrics
     metrics = {
         "num_episodes": sum(num_episodes_per_batch),
         "success_rate": sum(successs) / len(successs) if successs else 0,
+        "success_rate_std": np.std(successs) if successs else 0,
         "avg_reward": sum(rewardss) / len(rewardss) if rewardss else 0,
+        "avg_reward_std": np.std(rewardss) if rewardss else 0,
         "avg_steps": sum(episode_lengths) / len(episode_lengths) if episode_lengths else 0,
+        "avg_steps_std": np.std(episode_lengths) if episode_lengths else 0,
         "invalid_action_rate": sum(num_invalid_actions) / len(num_invalid_actions) if num_invalid_actions else 0,
+        "invalid_action_rate_std": np.std(num_invalid_actions) if num_invalid_actions else 0,
         "avg_steps_to_success": (
             sum([length for length, success in zip(episode_lengths, successs) if success]) /
             sum(successs) if sum(successs) > 0 else float("nan")
         ),
+        "avg_steps_to_success_std": np.std(running_success_lengths) if running_success_lengths else float("nan"),
         "avg_total_time": sum(total_times) / len(total_times),
+        "avg_total_time_std": np.std(total_times) if total_times else 0,
         "avg_generate_time": sum(total_generate_times) / len(total_generate_times),
+        "avg_generate_time_std": np.std(total_generate_times) if total_generate_times else 0,
     }
 
     return {
@@ -189,24 +173,21 @@ def evaluate(
         "batch_times": batch_times,
     }
 
-# Modified Plotting function to create a bar chart
+# Plotting function to create a bar chart for a single checkpoint
 def plot_performance(
-    env_ids: List[str],  # List of environment IDs to plot
+    env_ids: List[str],
     context_window: int,
-    baseline_results: Dict[str, float],  # Baseline success rates per env
-    reasoning_results: Dict[str, float],  # Reasoning success rates per env
-    non_reasoning_results: Dict[str, float],  # Non-reasoning success rates per env
+    baseline_results: Dict[str, float],
+    reasoning_results: Dict[str, float],
+    non_reasoning_results: Dict[str, float],
     env_type: str,
+    checkpoint_name: str,
 ):
-    # Set up the bar chart
     fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Number of environments
     n_envs = len(env_ids)
-    bar_width = 0.25  # Width of each bar
-    index = np.arange(n_envs)  # X-axis positions for each environment
+    bar_width = 0.25
+    index = np.arange(n_envs)
 
-    # Plot bars for each model
     ax.bar(index - bar_width, [baseline_results[env_id] for env_id in env_ids], 
            bar_width, label="Baseline (Untrained)", color='red', alpha=0.7)
     ax.bar(index, [reasoning_results[env_id] for env_id in env_ids], 
@@ -214,10 +195,9 @@ def plot_performance(
     ax.bar(index + bar_width, [non_reasoning_results[env_id] for env_id in env_ids], 
            bar_width, label="Non-Reasoning (Trained)", color='green', alpha=0.7)
 
-    # Customize the plot
     ax.set_xlabel("Environments", fontsize=12)
     ax.set_ylabel("Success Rate", fontsize=12)
-    ax.set_title(f"Model Performance Comparison (Context Window: {context_window}, {env_type})", fontsize=14)
+    ax.set_title(f"Model Performance Comparison (Checkpoint: {checkpoint_name}, Context Window: {context_window}, {env_type})", fontsize=14)
     ax.set_xticks(index)
     ax.set_xticklabels(env_ids, rotation=45, ha='right')
     ax.set_ylim(0, 1)
@@ -225,9 +205,7 @@ def plot_performance(
     ax.grid(True, linestyle='--', alpha=0.7)
 
     plt.tight_layout()
-
-    # Save the plot
-    plot_path = f"outputs/plots/{env_type.lower()}_comparison_ctx{context_window}.png"
+    plot_path = f"outputs/plots/{env_type.lower()}_comparison_{checkpoint_name}_ctx{context_window}.png"
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
 
@@ -261,10 +239,10 @@ def evaluate_models(
     results = {}
     current_step = step_offset
 
-    # Find the baseline (untrained) model
+    # Find the baseline model
     baseline_model_info = None
     for model_info in models_info:
-        if "untrained" in model_info['name'].lower():
+        if "baseline" in model_info['name'].lower():
             baseline_model_info = model_info
             break
 
@@ -319,17 +297,17 @@ def evaluate_models(
             baseline_results["unseen"][env_id][context_window] = result["final_metrics"]["success_rate"]
             current_step += num_batches
 
-    # Evaluate the trained model (reasoning and non-reasoning)
+    # Evaluate each trained model
     for model_info in models_info:
-        if "untrained" in model_info['name'].lower():
+        if "baseline" in model_info['name'].lower():
             continue
 
         model = model_info['model']
         tokenizer = model_info['tokenizer']
         model_name = model_info['name']
+        checkpoint_name = model_info.get('checkpoint_name', model_name)
         results[model_name] = {"seen": {}, "unseen": {}}
 
-        # Evaluate on seen environments
         for env_id in seen_env_ids:
             results[model_name]["seen"][env_id] = {}
             for context_window in context_windows:
@@ -372,7 +350,6 @@ def evaluate_models(
                 }
                 current_step += 2 * num_batches
 
-        # Evaluate on unseen environments
         for env_id in unseen_env_ids:
             results[model_name]["unseen"][env_id] = {}
             for context_window in context_windows:
@@ -415,71 +392,86 @@ def evaluate_models(
                 }
                 current_step += 2 * num_batches
 
-    # After evaluating all models, generate bar charts for each context window
-    for context_window in context_windows:
-        # Seen environments
-        seen_baseline = {env_id: baseline_results["seen"][env_id][context_window] for env_id in seen_env_ids}
-        seen_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in seen_env_ids}
-        seen_non_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in seen_env_ids}
+        for context_window in context_windows:
+            seen_baseline = {env_id: baseline_results["seen"][env_id][context_window] for env_id in seen_env_ids}
+            seen_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in seen_env_ids}
+            seen_non_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in seen_env_ids}
 
-        plot_performance(
-            env_ids=seen_env_ids,
-            context_window=context_window,
-            baseline_results=seen_baseline,
-            reasoning_results=seen_reasoning,
-            non_reasoning_results=seen_non_reasoning,
-            env_type="Seen",
-        )
+            plot_performance(
+                env_ids=seen_env_ids,
+                context_window=context_window,
+                baseline_results=seen_baseline,
+                reasoning_results=seen_reasoning,
+                non_reasoning_results=seen_non_reasoning,
+                env_type="Seen",
+                checkpoint_name=checkpoint_name,
+            )
 
-        # Unseen environments
-        unseen_baseline = {env_id: baseline_results["unseen"][env_id][context_window] for env_id in unseen_env_ids}
-        unseen_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in unseen_env_ids}
-        unseen_non_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in unseen_env_ids}
+            unseen_baseline = {env_id: baseline_results["unseen"][env_id][context_window] for env_id in unseen_env_ids}
+            unseen_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in unseen_env_ids}
+            unseen_non_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in unseen_env_ids}
 
-        plot_performance(
-            env_ids=unseen_env_ids,
-            context_window=context_window,
-            baseline_results=unseen_baseline,
-            reasoning_results=unseen_reasoning,
-            non_reasoning_results=unseen_non_reasoning,
-            env_type="Unseen",
-        )
+            plot_performance(
+                env_ids=unseen_env_ids,
+                context_window=context_window,
+                baseline_results=unseen_baseline,
+                reasoning_results=unseen_reasoning,
+                non_reasoning_results=unseen_non_reasoning,
+                env_type="Unseen",
+                checkpoint_name=checkpoint_name,
+            )
 
     return results
 
-# Example usage
-checkpoint = "pavanpreet-gandhi/babyai-ppo-2025-03-30_11-36-26"
-peft_config = PeftConfig.from_pretrained(checkpoint)
-base_model = AutoModelForCausalLM.from_pretrained(
-    peft_config.base_model_name_or_path,
+# Load baseline model once
+baseline_model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Llama-3.2-3B-Instruct",
     torch_dtype=torch.bfloat16,
-    device_map="cuda:0",
+    device_map="cuda",
 )
-peft_model = PeftModel.from_pretrained(base_model, checkpoint)
+baseline_tokenizer = AutoTokenizer.from_pretrained(
+    "meta-llama/Llama-3.2-3B-Instruct",
+    padding_side="left"
+)
 
+# Initialize models_info with the baseline model
 models_info = [
     {
-        'model': AutoModelForCausalLM.from_pretrained(
-            "meta-llama/Llama-3.2-3B-Instruct",
-            torch_dtype=torch.bfloat16,
-            device_map="cuda",
-        ),
-        'tokenizer': AutoTokenizer.from_pretrained(
-            "meta-llama/Llama-3.2-3B-Instruct",
-            padding_side="left"
-        ),
-        'name': 'llama-3.2-3b-untrained'
-    },
-    {
-        'model': peft_model,
-        'tokenizer': AutoTokenizer.from_pretrained(
-            peft_config.base_model_name_or_path,
-            padding_side="left"
-        ),
-        'name': 'llama-3.2-3b-trained'
+        'model': baseline_model,
+        'tokenizer': baseline_tokenizer,
+        'name': 'llama-3.2-3b-baseline'
     }
 ]
 
+# Checkpoints
+checkpoints = [
+    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0584ccf6786fc1733a7af991de032cf7dca00785"),  # Checkpoint 100
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c7fa7274f86f653a9db03aab81d2ab6e5a22d7f"),  # Checkpoint 90
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7f8b9386d2b27dba1484255e39eb82241e902c62"),  # Checkpoint 80
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "33952a7e415f6463b972e6273dc3019c4bf7f489"),  # Checkpoint 70
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "9d7f1d2930977248ba6a2b6f006c917b4f06df2a"),  # Checkpoint 60
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4275fb5ec80c9f84c03474aeedf0c81af8cf472e"),  # Checkpoint 50
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0c899f429c008150d05eb2d94f9b2f1e40933ecb"),  # Checkpoint 40
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d04ac0bcb78e7d803ad1d947e318b4e52b17080a"),  # Checkpoint 30
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d287a43a11c1c3ebd9e04016b4fdec66791cc323"),  # Checkpoint 20
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "67728556b8cff0b3c18556a26e62315216c1dd44"),  # Checkpoint 10
+    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0167cdea75d80598f4d674e14b4cb15f57a3ad96"),  # Initial commit
+]
+
+# Add each checkpoint as a trained model
+for idx, (checkpoint, commit_hash) in enumerate(checkpoints):
+    peft_config = PeftConfig.from_pretrained(checkpoint, revision=commit_hash)
+    peft_model = PeftModel.from_pretrained(baseline_model, checkpoint, revision=commit_hash)
+    checkpoint_short_name = f"Checkpoint_{(60 - idx*10)}"
+    
+    models_info.append({
+        'model': peft_model,
+        'tokenizer': baseline_tokenizer,  # Reuse baseline tokenizer
+        'name': f'llama-3.2-3b-trained-{idx}',
+        'checkpoint_name': checkpoint_short_name
+    })
+
+# Configure tokenizers and pad tokens
 for model_info in models_info:
     model_info['model'].config.pad_token_id = model_info['tokenizer'].eos_token_id
     tokenizer = model_info['tokenizer']
@@ -494,17 +486,31 @@ results = evaluate_models(
     models_info=models_info,
     seen_env_ids=seen_env_ids,
     unseen_env_ids=unseen_env_ids,
-    context_windows=[1, 3, 5],
-    num_batches=5,
+    context_windows=[5],
+    num_batches=10,
 )
 
-print("\n=== Evaluation Summary ===")
-for model_name, env_types in results.items():
-    for env_type, env_results in env_types.items():
-        for env_id, context_results in env_results.items():
-            for context_window, metrics in context_results.items():
-                print(f"{model_name} on {env_id} ({env_type}) with context {context_window}:")
-                for metric_type, metric_values in metrics.items():
-                    print(f"  {metric_type}:")
-                    for metric_name, value in metric_values.items():
-                        print(f"    {metric_name}: {value:.4f}")
+summary_file = "outputs/logs/evaluation_summary.txt"
+with open(summary_file, "w") as f:
+    f.write("=== Evaluation Summary ===\n")
+    for model_name, env_types in results.items():
+        f.write(f"{model_name}:\n")
+        for env_type, env_results in env_types.items():
+            f.write(f"  {env_type}:\n")
+            for env_id, context_results in env_results.items():
+                for context_window, metrics in context_results.items():
+                    f.write(f"    {model_name} on {env_id} ({env_type}) with context {context_window}:\n")
+                    for metric_type, metric_values in metrics.items():
+                        f.write(f"      {metric_type}:\n")
+                        # Loop over each metric. If a corresponding _std is present,
+                        # print the value plus/minus the standard deviation.
+                        # We won't print the std separately.
+                        for metric_name, value in metric_values.items():
+                            std_key = f"{metric_name}_std"
+                            if std_key in metric_values:
+                                std_value = metric_values[std_key]
+                                f.write(f"        {metric_name}: {value:.4f} ± {std_value:.4f}\n")
+                            else:
+                                f.write(f"        {metric_name}: {value:.4f}\n")
+    f.write("\n")
+print(f"Evaluation summary logged to {summary_file}")
