@@ -50,6 +50,7 @@ class EnvManager:
             else:
                 obs, reward, done, info = self.env.step(action)
                 text_obs = "\n".join(info["descriptions"])
+                self.consecutive_invalid_actions = 0
 
         else:
             action = utils.text_to_action.get(text_action, None)
@@ -72,4 +73,5 @@ class EnvManager:
             else:
                 obs, reward, done, info = self.env.step(action)
                 text_obs = "\n".join(info["descriptions"])
+                self.consecutive_invalid_actions = 0
         return text_obs, reward, done

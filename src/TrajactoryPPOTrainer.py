@@ -11,10 +11,11 @@ def log_memory(logger, point):
                 f"Max: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
 
 class BatchedTrajectoryPPOTrainer(PPOTrainer):
-    def __init__(self, config: PPOConfig, model, ref_model, tokenizer, gamma=0.9, gae_lambda=0.95):
+    def __init__(self, config: PPOConfig, model, ref_model, tokenizer, gamma=0.9, gae_lambda=0.95, exclude_invalid_actions=False):
         super().__init__(config, model, ref_model, tokenizer)
         self.gamma = gamma
         self.gae_lambda = gae_lambda
+        self.exclude_invalid_actions = exclude_invalid_actions
 
     @PPODecorators.empty_device_cache()
     def compute_returns(self, 
@@ -55,8 +56,9 @@ class BatchedTrajectoryPPOTrainer(PPOTrainer):
         
         for t in reversed(range(len(rewards))):
             G = rewards[t] + self.gamma * (1.0 - self.gae_lambda) * next_value + self.gamma * self.gae_lambda * last_G
+            G_excluding_invalid = G if not self.exclude_invalid_actions else max(0.0, rewards[t]) + self.gamma * (1.0 - self.gae_lambda) * next_value + self.gamma * self.gae_lambda * last_G
             Gs.append(G)
-            last_G = G
+            last_G = G_excluding_invalid
             next_value = traj_values[t]
         Gs.reverse()  # Reverse to get the correct order
         

@@ -57,6 +57,7 @@ def sample_batch(
     reasoning_flag: bool = False,
     trajectory_rl: bool = False,
     episode_counter: EpisodeCounter = None,
+    hide_invalid_action_in_context: bool = False,
 ):
     """
     Sample a batch of experiences using the model from the given environments.
@@ -71,10 +72,10 @@ def sample_batch(
         a = tokenizer.chat_template
         # Remove the literal Jinja2 lines that print those date strings
         tokenizer.chat_template = tokenizer.chat_template.replace(
-            '{{- "Cutting Knowledge Date: December 2023\\n" }}\n', ''
+            '{{- "Cutting Knowledge Date: December 2023\\n" }}\n', ""
         )
         tokenizer.chat_template = tokenizer.chat_template.replace(
-            '{{- "Today Date: " + date_string + "\\n\\n" }}\n', ''
+            '{{- "Today Date: " + date_string + "\\n\\n" }}\n', ""
         )
         # breakpoint()
         # print("=== AFTER ===")
@@ -171,9 +172,11 @@ def sample_batch(
             dones_ep[i].append(done)
 
             # Update context
+            if hide_invalid_action_in_context and (text_obs[:7] == "Invalid"):
+                actions[i] = "Generated invalid action"
             contexts[i].append({"role": "assistant", "content": actions[i]})
             contexts[i].append({"role": "user", "content": text_obs})
-
+            # breakpoint()
             if done:
                 # Collect stats
                 final_reward = reward
@@ -279,7 +282,7 @@ if __name__ == "__main__":
         "meta-llama/Llama-3.2-3B-Instruct"  # "HuggingFaceTB/SmolLM2-135M-Instruct"
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id)    
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id).to(device)
     trainer = BatchedTrajectoryPPOTrainer(model=model)
     generation_kwargs = {
