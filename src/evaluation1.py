@@ -1,226 +1,188 @@
 import numpy as np
 import torch
-import gym
 import time
 import matplotlib.pyplot as plt
-from env_manager import EnvManager
+from src import EnvManager
+from sample_episodes import sample_episodes
 import babyai_text
-import utils
 from peft import PeftModel, PeftConfig
 from typing import Dict, Any, List, Union
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer
+from trl import AutoModelForCausalLMWithValueHead
 import logging
 import os
 
-# Suppress transformers logging to ERROR level to avoid unnecessary logging
+
+# Set PyTorch CUDA allocator config to reduce fragmentation
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+# Suppress transformers logging to ERROR level
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
-# Create directories for outputs if they don’t exist
+# Create directories for outputs
 os.makedirs("outputs/plots", exist_ok=True)
 os.makedirs("outputs/logs", exist_ok=True)
 
+
 babyai_text.register_levels(__name__, globals())
 
-# Evaluation function on a single model
 def evaluate(
-    model: AutoModelForCausalLM,
-    tokenizer: AutoTokenizer,
+    model,
+    tokenizer,
     env_id: str,
     context_window: int,
-    num_envs: int = 4,
+    num_envs: int = 1,
     num_episodes: int = 50,
     reasoning_flag: bool = False,
     generation_kwargs: dict = None,
     device: torch.device = None,
-    invalid_action_penalty: float = -0.1,  # Matches EnvManager default
+    invalid_action_penalty: float = -0.1,
     consecutive_invalid_actions_allowed: int = 5,
     model_name: str = "model",
     step_offset: int = 0,
 ) -> Dict[str, Any]:
-    print(f"Evaluating {model_name} on {env_id} with {num_episodes} episodes...")
+    """
+    Evaluate a model on BabyAI tasks by running a fixed number of episodes.
+    This version directly uses sample_episodes(...) to gather rollouts.
+    """
 
     if generation_kwargs is None:
         generation_kwargs = {
             "max_new_tokens": 20,
             "do_sample": True,
-            "top_k": 10,
+            "top_k": 50,
             "top_p": 0.95,
             "temperature": 0.8,
-            "pad_token_id": tokenizer.eos_token_id,
         }
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Move model to device
+    print(f"Evaluating {model_name} on {env_id} with {num_episodes} episodes (reasoning={reasoning_flag})...")
+
+    # Move model to device and set evaluation mode
     model.to(device)
     model.eval()
 
-    # Initialize environments
-    try:
-        envs = [
-            EnvManager(
-                [env_id],
-                invalid_action_penalty=invalid_action_penalty,
-                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
-                reasoning_flag=reasoning_flag,
-            ) for _ in range(num_envs)
-        ]
-    except Exception as e:
-        print(f"Failed to initialize environments for {env_id}: {e}")
-        raise
+    # If the model does not have a generation_config, inject one.
+    if not hasattr(model, "generation_config"):
+        from transformers import GenerationConfig
+        model.generation_config = GenerationConfig(**generation_kwargs)
 
-    # Metrics storage
-    total_times = []
-    total_generate_times = []
-    successs = []
-    rewardss = []
-    episode_lengths = []
-    num_invalid_actions = []
-    running_success_rates = []
-    running_avg_rewards = []
-    episode_times = []
+    # Create multiple EnvManager instances
+    envs = [
+        EnvManager(
+            env_ids=[env_id],
+            invalid_action_penalty=invalid_action_penalty,
+            consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+            reasoning_flag=reasoning_flag
+        )
+        for _ in range(num_envs)
+    ]
 
-    # Episode tracking
-    episodes_completed = 0
+    # Run sample_episodes to gather rollouts (assuming sample_episodes is imported)
     eval_start_time = time.time()
-    system_prompt_template = utils.get_system_prompt(reasoning_flag=reasoning_flag)
+    stats, contexts = sample_episodes(
+        envs=envs,
+        tokenizer=tokenizer,
+        model=model,
+        generation_kwargs=generation_kwargs,
+        device=device,
+        number_of_episodes=num_episodes,
+        context_window=context_window,
+        reasoning_flag=reasoning_flag,
+    )
+    eval_end_time = time.time()
+    
 
-    while episodes_completed < num_episodes:
-        # Reset environments in parallel
-        batch_size = min(num_envs, num_episodes - episodes_completed)
-        active_envs = envs[:batch_size]
-        missions, obss = zip(*[env.reset() for env in active_envs])
-        contexts = [[] for _ in range(batch_size)]
-        steps = [0] * batch_size
-        rewards = [0.0] * batch_size
-        invalid_counts = [0] * batch_size
-        dones = [False] * batch_size
+    # Basic metrics from stats
+    # stats includes: "success", "rewards", "episode_lengths", "num_invalid_actions"
+    num_samples = len(stats["success"])
+    if num_samples == 0:
+        # Edge case: if no episodes were actually run
+        return {
+            "final_metrics": {
+                "num_episodes": 0,
+                "success_rate": 0.0,
+                "success_rate_std": 0.0,
+                "avg_reward": 0.0,
+                "avg_reward_std": 0.0,
+                "avg_steps": 0.0,
+                "avg_steps_std": 0.0,
+                "invalid_action_rate": 0.0,
+                "invalid_action_rate_std": 0.0,
+                "avg_steps_to_success": float("nan"),
+                "avg_steps_to_success_std": float("nan"),
+                "avg_total_time": 0.0,
+                "avg_generate_time": 0.0,
+            },
+            "running_success_rates": [],
+            "running_avg_rewards": [],
+            "episode_times": [],
+        }
 
-        # Initialize contexts
-        for i in range(batch_size):
-            system_prompt = system_prompt_template.replace("{goal}", missions[i])
-            contexts[i].append({"role": "system", "content": system_prompt})
-            contexts[i].append({"role": "user", "content": obss[i]})
+    # Convert stats to tensors for easy math
+    success_tensor = torch.tensor(stats["success"], dtype=torch.float32)
+    reward_tensor = torch.tensor(stats["rewards"], dtype=torch.float32)
+    length_tensor = torch.tensor(stats["episode_lengths"], dtype=torch.float32)
+    invalid_tensor = torch.tensor(stats["num_invalid_actions"], dtype=torch.float32)
 
-        batch_start_time = time.time()
+    success_rate = success_tensor.mean().item()
+    success_rate_std = success_tensor.std().item() if num_samples > 1 else 0.0
 
-        # Run episodes until all are done
-        while not all(dones):
-            generate_start_time = time.time()
+    avg_reward = reward_tensor.mean().item()
+    avg_reward_std = reward_tensor.std().item() if num_samples > 1 else 0.0
 
-            # Prepare queries
-            queries = []
-            for i, context in enumerate(contexts):
-                if not dones[i]:
-                    if len(context) > (2 * context_window + 1):
-                        clipped_context = [context[0]] + context[-(2 * context_window):]
-                    else:
-                        clipped_context = context
-                    query = tokenizer.apply_chat_template(
-                        clipped_context, return_tensors="pt", add_generation_prompt=True
-                    ).squeeze(0)
-                    queries.append(query)
-                else:
-                    queries.append(None)
+    avg_steps = length_tensor.mean().item()
+    avg_steps_std = length_tensor.std().item() if num_samples > 1 else 0.0
 
-            # Batch and generate actions
-            active_indices = [i for i, q in enumerate(queries) if q is not None]
-            if not active_indices:
-                break
+    invalid_rate = invalid_tensor.mean().item()
+    invalid_rate_std = invalid_tensor.std().item() if num_samples > 1 else 0.0
 
-            active_queries = [queries[i] for i in active_indices]
-            queries_batched = torch.nn.utils.rnn.pad_sequence(
-                active_queries, batch_first=True, padding_value=tokenizer.pad_token_id
-            ).to(device)
+    # Steps to success (for episodes that succeeded)
+    successful_indices = (success_tensor == 1)
+    if successful_indices.any():
+        steps_for_successes = length_tensor[successful_indices]
+        avg_steps_success = steps_for_successes.mean().item()
+        avg_steps_success_std = steps_for_successes.std().item() if len(steps_for_successes) > 1 else 0.0
+    else:
+        avg_steps_success = float("nan")
+        avg_steps_success_std = float("nan")
 
-            with torch.no_grad():
-                outputs = model.generate(
-                    input_ids=queries_batched,
-                    **generation_kwargs
-                )
-            responses = [tokenizer.decode(output, skip_special_tokens=True) for output in outputs]
+    # We didn't track generation time for each step in sample_episodes(...) by default
+    # If you'd like, you can modify sample_episodes to accumulate generation_time and return it in stats.
 
-            generate_time = time.time() - generate_start_time
-            total_generate_times.append(generate_time)
+    total_time = eval_end_time - eval_start_time
 
-            # Step environments
-            for idx, i in enumerate(active_indices):
-                raw_action = responses[idx].strip()
-
-                # Handle reasoning_flag parsing
-                if reasoning_flag:
-                    if "final answer:" in raw_action:
-                        text_action = raw_action.split("final answer:")[-1].strip()
-                    else:
-                        text_action = raw_action  # Will be invalid due to format
-                else:
-                    text_action = raw_action
-
-                # Check action validity
-                action = utils.text_to_action.get(text_action, None)
-                is_invalid = action is None or (reasoning_flag and "final answer:" not in raw_action)
-
-                # Step the environment
-                obs, reward, done = active_envs[i].step(raw_action)
-                steps[i] += 1
-                rewards[i] += reward
-
-                if is_invalid:
-                    invalid_counts[i] += 1
-
-                if not done:
-                    contexts[i].append({"role": "assistant", "content": raw_action})
-                    contexts[i].append({"role": "user", "content": obs})
-                else:
-                    dones[i] = True
-                    # Success if final reward > 0 (BabyAI sparse reward)
-                    success = 1 if reward > 0 else 0
-                    successs.append(success)
-                    rewardss.append(rewards[i])
-                    episode_lengths.append(steps[i])
-                    num_invalid_actions.append(invalid_counts[i])
-                    episodes_completed += 1
-
-                    # Update running metrics
-                    running_success_rate = sum(successs) / len(successs)
-                    running_avg_reward = sum(rewardss) / len(rewardss)
-                    running_success_rates.append(running_success_rate)
-                    running_avg_rewards.append(running_avg_reward)
-                    elapsed_time = time.time() - eval_start_time
-                    episode_times.append(elapsed_time)
-
-        total_times.append(time.time() - batch_start_time)
-
-    # Compute final metrics
+    # Return final dictionary consistent with your typical format
     metrics = {
-        "num_episodes": len(successs),
-        "success_rate": sum(successs) / len(successs) if successs else 0,
-        "success_rate_std": np.std(successs) if successs else 0,
-        "avg_reward": sum(rewardss) / len(rewardss) if rewardss else 0,
-        "avg_reward_std": np.std(rewardss) if rewardss else 0,
-        "avg_steps": sum(episode_lengths) / len(episode_lengths) if episode_lengths else 0,
-        "avg_steps_std": np.std(episode_lengths) if episode_lengths else 0,
-        "invalid_action_rate": sum(num_invalid_actions) / len(num_invalid_actions) if num_invalid_actions else 0,
-        "invalid_action_rate_std": np.std(num_invalid_actions) if num_invalid_actions else 0,
-        "avg_steps_to_success": (
-            sum([l for l, s in zip(episode_lengths, successs) if s]) / sum(successs) if sum(successs) > 0 else float("nan")
-        ),
-        "avg_steps_to_success_std": np.std([l for l, s in zip(episode_lengths, successs) if s]) if sum(successs) > 0 else float("nan"),
-        "avg_total_time": sum(total_times) / len(total_times),
-        "avg_total_time_std": np.std(total_times) if total_times else 0,
-        "avg_generate_time": sum(total_generate_times) / len(total_generate_times),
-        "avg_generate_time_std": np.std(total_generate_times) if total_generate_times else 0,
+        "num_episodes": num_samples,
+        "success_rate": success_rate,
+        "success_rate_std": success_rate_std,
+        "avg_reward": avg_reward,
+        "avg_reward_std": avg_reward_std,
+        "avg_steps": avg_steps,
+        "avg_steps_std": avg_steps_std,
+        "invalid_action_rate": invalid_rate,
+        "invalid_action_rate_std": invalid_rate_std,
+        "avg_steps_to_success": avg_steps_success,
+        "avg_steps_to_success_std": avg_steps_success_std,
+        "avg_total_time": total_time,          # total for the entire run
+        "avg_total_time_std": 0.0,            # we only did one entire run
+        "avg_generate_time": float("nan"),    # can’t be computed unless sample_episodes returns timing
+        "avg_generate_time_std": float("nan"),
     }
 
+    # If you want “running_success_rates,” “running_avg_rewards,” or “episode_times,”
+    # you can easily track them in sample_episodes(...) as well.
+    # For now, we’ll return empty lists for them by default.
     return {
         "final_metrics": metrics,
-        "running_success_rates": running_success_rates,
-        "running_avg_rewards": running_avg_rewards,
-        "episode_times": episode_times,
+        "running_success_rates": [],
+        "running_avg_rewards": [],
+        "episode_times": [],
     }
-
-# Plotting function
+# Plotting function (unchanged)
 def plot_performance(
     env_ids: List[str],
     context_window: int,
@@ -256,17 +218,17 @@ def plot_performance(
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
 
-# Evaluation function on mutliple models
+# Evaluation function on multiple models (minor adjustments)
 def evaluate_models(
     models_info: List[Dict[str, Any]],
     seen_env_ids: List[str],
     unseen_env_ids: List[str],
-    context_windows: List[int] = [1, 2, 3, 4, 5],
-    num_envs: int = 4,
+    context_windows: List[int] = [5],
+    num_envs: int = 6,  # Aligned with notebook
     num_episodes: int = 50,
     generation_kwargs: dict = None,
     device: torch.device = None,
-    invalid_action_penalty: float = -0.1,
+    invalid_action_penalty: float = -2.0,  # Aligned with notebook
     consecutive_invalid_actions_allowed: int = 5,
     step_offset: int = 0,
 ) -> Dict[str, Dict[str, Dict[int, Dict[str, Any]]]]:
@@ -274,7 +236,7 @@ def evaluate_models(
         generation_kwargs = {
             "max_new_tokens": 20,
             "do_sample": True,
-            "top_k": 10,
+            "top_k": 50,
             "top_p": 0.95,
             "temperature": 0.8,
         }
@@ -464,7 +426,7 @@ def evaluate_models(
     return results
 
 # Load baseline model
-baseline_model = AutoModelForCausalLM.from_pretrained(
+baseline_model = AutoModelForCausalLMWithValueHead.from_pretrained(
     "meta-llama/Llama-3.2-3B-Instruct",
     torch_dtype=torch.bfloat16,
     device_map="cuda",
@@ -474,7 +436,7 @@ baseline_tokenizer = AutoTokenizer.from_pretrained(
     padding_side="left"
 )
 
-# Initialize models_info with raw baseline model
+# Initialize models_info with baseline model
 models_info = [
     {
         'model': baseline_model,
@@ -486,7 +448,7 @@ models_info = [
 # Checkpoints
 checkpoints = [
     ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "3a698a6adce4838068348f97e87dafddbf05be2d"),  # Checkpoint 160
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4b4784ff36b04aa34cc3f84bf154c30e133c9a36"),  # Checkpoint 150
+    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4b4784ff36b04aa34cc3f84bf154c30e133c9a36"),  # Checkpoint 150
     #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c27ab0a7fbd204138b01ca6b38a20adfda0128e"),  # Checkpoint 140
     #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "169b7890e98134d71d14707751e55f7eee54507a"),  # Checkpoint 130
     #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0eb2d6751c2ba48a0d95302a10ee84f1b4ab274b"),  # Checkpoint 120
@@ -508,7 +470,7 @@ checkpoints = [
 for idx, (checkpoint, commit_hash) in enumerate(checkpoints):
     peft_config = PeftConfig.from_pretrained(checkpoint, revision=commit_hash)
     peft_model = PeftModel.from_pretrained(baseline_model, checkpoint, revision=commit_hash)
-    checkpoint_short_name = f"Checkpoint_{(60 - idx*10)}"
+    checkpoint_short_name = f"Checkpoint_{(160 - idx*10)}"
     
     models_info.append({
         'model': peft_model,
