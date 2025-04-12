@@ -12,17 +12,23 @@ from trl import AutoModelForCausalLMWithValueHead
 import logging
 import os
 
-
 # Set PyTorch CUDA allocator config to reduce fragmentation
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # Suppress transformers logging to ERROR level
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
+
+# Configure logging
+logging.basicConfig(
+    filename="outputs/logs/evaluation.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
 # Create directories for outputs
 os.makedirs("outputs/plots", exist_ok=True)
 os.makedirs("outputs/logs", exist_ok=True)
-
 
 babyai_text.register_levels(__name__, globals())
 
@@ -32,20 +38,15 @@ def evaluate(
     env_id: str,
     context_window: int,
     num_envs: int = 1,
-    num_episodes: int = 50,
+    num_episodes: int = 5,  # Reduced for debugging
     reasoning_flag: bool = False,
     generation_kwargs: dict = None,
     device: torch.device = None,
-    invalid_action_penalty: float = -0.1,
+    invalid_action_penalty: float = -2.0,
     consecutive_invalid_actions_allowed: int = 5,
     model_name: str = "model",
     step_offset: int = 0,
 ) -> Dict[str, Any]:
-    """
-    Evaluate a model on BabyAI tasks by running a fixed number of episodes.
-    This version directly uses sample_episodes(...) to gather rollouts.
-    """
-
     if generation_kwargs is None:
         generation_kwargs = {
             "max_new_tokens": 20,
@@ -58,18 +59,16 @@ def evaluate(
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    logging.info(f"Evaluating {model_name} on {env_id} with {num_episodes} episodes (reasoning={reasoning_flag})")
     print(f"Evaluating {model_name} on {env_id} with {num_episodes} episodes (reasoning={reasoning_flag})...")
 
-    # Move model to device and set evaluation mode
     model.to(device)
     model.eval()
 
-    # If the model does not have a generation_config, inject one.
     if not hasattr(model, "generation_config"):
         from transformers import GenerationConfig
         model.generation_config = GenerationConfig(**generation_kwargs)
 
-    # Create multiple EnvManager instances
     envs = [
         EnvManager(
             env_ids=[env_id],
@@ -80,7 +79,6 @@ def evaluate(
         for _ in range(num_envs)
     ]
 
-    # Run sample_episodes to gather rollouts (assuming sample_episodes is imported)
     eval_start_time = time.time()
     stats, contexts = sample_episodes(
         envs=envs,
@@ -93,35 +91,32 @@ def evaluate(
         reasoning_flag=reasoning_flag,
     )
     eval_end_time = time.time()
-    
 
-    # Basic metrics from stats
-    # stats includes: "success", "rewards", "episode_lengths", "num_invalid_actions"
     num_samples = len(stats["success"])
     if num_samples == 0:
-        # Edge case: if no episodes were actually run
+        metrics = {
+            "num_episodes": 0,
+            "success_rate": 0.0,
+            "success_rate_std": 0.0,
+            "avg_reward": 0.0,
+            "avg_reward_std": 0.0,
+            "avg_steps": 0.0,
+            "avg_steps_std": 0.0,
+            "invalid_action_rate": 0.0,
+            "invalid_action_rate_std": 0.0,
+            "avg_steps_to_success": float("nan"),
+            "avg_steps_to_success_std": float("nan"),
+            "avg_total_time": 0.0,
+            "avg_generate_time": 0.0,
+        }
+        logging.warning(f"No episodes completed for {model_name} on {env_id}")
         return {
-            "final_metrics": {
-                "num_episodes": 0,
-                "success_rate": 0.0,
-                "success_rate_std": 0.0,
-                "avg_reward": 0.0,
-                "avg_reward_std": 0.0,
-                "avg_steps": 0.0,
-                "avg_steps_std": 0.0,
-                "invalid_action_rate": 0.0,
-                "invalid_action_rate_std": 0.0,
-                "avg_steps_to_success": float("nan"),
-                "avg_steps_to_success_std": float("nan"),
-                "avg_total_time": 0.0,
-                "avg_generate_time": 0.0,
-            },
+            "final_metrics": metrics,
             "running_success_rates": [],
             "running_avg_rewards": [],
             "episode_times": [],
         }
 
-    # Convert stats to tensors for easy math
     success_tensor = torch.tensor(stats["success"], dtype=torch.float32)
     reward_tensor = torch.tensor(stats["rewards"], dtype=torch.float32)
     length_tensor = torch.tensor(stats["episode_lengths"], dtype=torch.float32)
@@ -129,17 +124,13 @@ def evaluate(
 
     success_rate = success_tensor.mean().item()
     success_rate_std = success_tensor.std().item() if num_samples > 1 else 0.0
-
     avg_reward = reward_tensor.mean().item()
     avg_reward_std = reward_tensor.std().item() if num_samples > 1 else 0.0
-
     avg_steps = length_tensor.mean().item()
     avg_steps_std = length_tensor.std().item() if num_samples > 1 else 0.0
-
     invalid_rate = invalid_tensor.mean().item()
     invalid_rate_std = invalid_tensor.std().item() if num_samples > 1 else 0.0
 
-    # Steps to success (for episodes that succeeded)
     successful_indices = (success_tensor == 1)
     if successful_indices.any():
         steps_for_successes = length_tensor[successful_indices]
@@ -149,12 +140,9 @@ def evaluate(
         avg_steps_success = float("nan")
         avg_steps_success_std = float("nan")
 
-    # We didn't track generation time for each step in sample_episodes(...) by default
-    # If you'd like, you can modify sample_episodes to accumulate generation_time and return it in stats.
-
     total_time = eval_end_time - eval_start_time
+    avg_generate_time = stats.get("total_generate_time", float("nan")) / num_samples if num_samples > 0 else float("nan")
 
-    # Return final dictionary consistent with your typical format
     metrics = {
         "num_episodes": num_samples,
         "success_rate": success_rate,
@@ -167,22 +155,20 @@ def evaluate(
         "invalid_action_rate_std": invalid_rate_std,
         "avg_steps_to_success": avg_steps_success,
         "avg_steps_to_success_std": avg_steps_success_std,
-        "avg_total_time": total_time,          # total for the entire run
-        "avg_total_time_std": 0.0,            # we only did one entire run
-        "avg_generate_time": float("nan"),    # can’t be computed unless sample_episodes returns timing
-        "avg_generate_time_std": float("nan"),
+        "avg_total_time": total_time,
+        "avg_total_time_std": 0.0,
+        "avg_generate_time": avg_generate_time,
+        "avg_generate_time_std": 0.0,
     }
 
-    # If you want “running_success_rates,” “running_avg_rewards,” or “episode_times,”
-    # you can easily track them in sample_episodes(...) as well.
-    # For now, we’ll return empty lists for them by default.
+    logging.info(f"Metrics for {model_name} on {env_id}: {metrics}")
     return {
         "final_metrics": metrics,
         "running_success_rates": [],
         "running_avg_rewards": [],
         "episode_times": [],
     }
-# Plotting function (unchanged)
+
 def plot_performance(
     env_ids: List[str],
     context_window: int,
@@ -217,18 +203,18 @@ def plot_performance(
     plot_path = f"outputs/plots/{env_type.lower()}_comparison_{checkpoint_name}_ctx{context_window}.png"
     plt.savefig(plot_path, dpi=300, bbox_inches='tight')
     plt.close()
+    logging.info(f"Plot saved to {plot_path}")
 
-# Evaluation function on multiple models (minor adjustments)
 def evaluate_models(
     models_info: List[Dict[str, Any]],
     seen_env_ids: List[str],
     unseen_env_ids: List[str],
     context_windows: List[int] = [5],
-    num_envs: int = 6,  # Aligned with notebook
-    num_episodes: int = 50,
+    num_envs: int = 1,  # Reduced for debugging
+    num_episodes: int = 5,  # Reduced for debugging
     generation_kwargs: dict = None,
     device: torch.device = None,
-    invalid_action_penalty: float = -2.0,  # Aligned with notebook
+    invalid_action_penalty: float = -2.0,
     consecutive_invalid_actions_allowed: int = 5,
     step_offset: int = 0,
 ) -> Dict[str, Dict[str, Dict[int, Dict[str, Any]]]]:
@@ -445,25 +431,9 @@ models_info = [
     }
 ]
 
-# Checkpoints
+# Checkpoints (reduced for debugging)
 checkpoints = [
     ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "3a698a6adce4838068348f97e87dafddbf05be2d"),  # Checkpoint 160
-    ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4b4784ff36b04aa34cc3f84bf154c30e133c9a36"),  # Checkpoint 150
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c27ab0a7fbd204138b01ca6b38a20adfda0128e"),  # Checkpoint 140
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "169b7890e98134d71d14707751e55f7eee54507a"),  # Checkpoint 130
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0eb2d6751c2ba48a0d95302a10ee84f1b4ab274b"),  # Checkpoint 120
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "57c165bcb6db38a78b7d67846fbb2418041fca99"),  # Checkpoint 110
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0584ccf6786fc1733a7af991de032cf7dca00785"),  # Checkpoint 100
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7c7fa7274f86f653a9db03aab81d2ab6e5a22d7f"),  # Checkpoint 90
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "7f8b9386d2b27dba1484255e39eb82241e902c62"),  # Checkpoint 80
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "33952a7e415f6463b972e6273dc3019c4bf7f489"),  # Checkpoint 70
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "9d7f1d2930977248ba6a2b6f006c917b4f06df2a"),  # Checkpoint 60
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "4275fb5ec80c9f84c03474aeedf0c81af8cf472e"),  # Checkpoint 50
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0c899f429c008150d05eb2d94f9b2f1e40933ecb"),  # Checkpoint 40
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d04ac0bcb78e7d803ad1d947e318b4e52b17080a"),  # Checkpoint 30
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "d287a43a11c1c3ebd9e04016b4fdec66791cc323"),  # Checkpoint 20
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "67728556b8cff0b3c18556a26e62315216c1dd44"),  # Checkpoint 10
-    #("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "0167cdea75d80598f4d674e14b4cb15f57a3ad96"),  # Initial commit
 ]
 
 # Add each checkpoint as a trained model
@@ -488,7 +458,7 @@ for model_info in models_info:
         print(f"Setting pad_token to eos_token for {model_info['name']}")
 
 seen_env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"]
-unseen_env_ids = ["BabyAI-Open-v0", "BabyAI-PutNext-v0", "BabyAI-PickUpSeqGoTo-v0"]
+unseen_env_ids = ["BabyAI-Open-v0"]
 
 # Run evaluation
 results = evaluate_models(
@@ -496,7 +466,7 @@ results = evaluate_models(
     seen_env_ids=seen_env_ids,
     unseen_env_ids=unseen_env_ids,
     context_windows=[5],
-    num_episodes=50,
+    num_episodes=5,
 )
 
 # Summary logging
