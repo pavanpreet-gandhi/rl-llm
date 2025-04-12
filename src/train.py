@@ -71,6 +71,7 @@ def parse_args() -> Dict[str, Any]:
         "context_window": 5,
         "reasoning_flag": True,
         "hide_invalid_action_in_context": True,
+        "num_dists": 0,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 50,  # no top-k sampling
@@ -109,6 +110,7 @@ def setup_training(args, logger: logging.Logger):
             invalid_action_penalty=args.invalid_action_penalty,
             consecutive_invalid_actions_allowed=args.consecutive_invalid_actions_allowed,
             reasoning_flag=args.reasoning_flag,
+            num_dists=args.num_dists,
         )
         for i in range(args.num_envs)
     ]

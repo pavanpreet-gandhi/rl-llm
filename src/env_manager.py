@@ -11,17 +11,19 @@ class EnvManager:
         env_ids: List[str], 
         invalid_action_penalty: float = -0.1, 
         consecutive_invalid_actions_allowed: int = 5, 
-        reasoning_flag: bool = False
+        reasoning_flag: bool = False,
+        num_dists: int = 0
     ):
         self.env_ids = env_ids
         self.invalid_action_penalty = invalid_action_penalty
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
         self.reasoning_flag = reasoning_flag
+        self.num_dists = num_dists
     
     def reset(self) -> Tuple[str, str]:
         self.env_id = random.choice(self.env_ids)
-        self.env = gym.make(self.env_id, disable_env_checker=True, num_dists=0)
+        self.env = gym.make(self.env_id, disable_env_checker=True, num_dists=self.num_dists)
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
         mission = obs["mission"]
