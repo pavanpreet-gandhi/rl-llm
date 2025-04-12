@@ -43,6 +43,7 @@ def sample_episodes(
     rewards_by_env_id = {env_id: [] for env_id in possible_env_ids}
     episode_lengths_by_env_id = {env_id: [] for env_id in possible_env_ids}
     num_invalid_actions_by_env_id = {env_id: [] for env_id in possible_env_ids}
+    contexts_of_completed_episodes = []
 
     # Main loop
     while episodes < number_of_episodes:
@@ -112,6 +113,7 @@ def sample_episodes(
                     rewards_by_env_id[key].append(final_reward if success else 0)
                     episode_lengths_by_env_id[key].append(episode_length)
                     num_invalid_actions_by_env_id[key].append(num_invalid_actions)
+                contexts_of_completed_episodes.append(contexts[i])
                 
                 # Discount rewards if successful
                 if success:
@@ -126,6 +128,10 @@ def sample_episodes(
                 contexts[i].append({"role": "user", "content": text_obs})
                 episodes += 1
 
+                # Print progress
+                print(episodes, end=" ")
+    print()
+
     # Store stats
     stats = {}
     stats["total_generate_time"] = total_generate_time
@@ -134,7 +140,7 @@ def sample_episodes(
     stats["episode_lengths"] = episode_lengths_by_env_id["all"]
     stats["num_invalid_actions"] = num_invalid_actions_by_env_id["all"]
 
-    return stats
+    return stats, contexts
 
 
 if __name__ == "__main__":
