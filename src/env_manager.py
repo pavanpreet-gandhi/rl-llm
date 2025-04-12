@@ -16,19 +16,32 @@ class EnvManager:
     def __init__(
         self,
         env_ids: List[str], 
-        invalid_action_penalty: float = -2.0, 
-        consecutive_invalid_actions_allowed: int = 7, 
+        weights: List[float] = None,  # Added weights parameter
+        invalid_action_penalty: float = -0.1, 
+        consecutive_invalid_actions_allowed: int = 5, 
         reasoning_flag: bool = False
     ):
         self.env_ids = env_ids
+        self.weights = weights  # Save weights
         self.invalid_action_penalty = invalid_action_penalty
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
         self.reasoning_flag = reasoning_flag
         self.last_observation = ""
     
+    def set_weights(self, weights: List[float]):
+        self.weights = weights
+        logging.info(f"Updated weights: {self.weights}")
+
     def reset(self) -> Tuple[str, str]:
-        self.env_id = random.choice(self.env_ids)
+        # Use weights if provided and non-zero, else use uniform random selection
+        if self.weights is None or all(w == 0 for w in self.weights):
+            self.env_id = random.choice(self.env_ids)
+            logging.debug("Using uniform random selection for environment ID")
+        else:
+            self.env_id = random.choices(self.env_ids, weights=self.weights, k=1)[0]
+            logging.debug(f"Using weighted selection for environment ID: {self.env_id}")
+
         self.env = gym.make(self.env_id, disable_env_checker=True, num_dists=0)
         self.consecutive_invalid_actions = 0
         obs, info = self.env.reset()
@@ -87,16 +100,16 @@ class EnvManager:
                 if not potential_action:
                     if "right" in extracted_action:
                         potential_action = "turn right"
-                        logging.debug(f"Found keyword 'right' in text, mapping to 'turn right'")
+                        logging.debug("Found keyword 'right' in text, mapping to 'turn right'")
                     elif "left" in extracted_action:
                         potential_action = "turn left"
-                        logging.debug(f"Found keyword 'left' in text, mapping to 'turn left'")
+                        logging.debug("Found keyword 'left' in text, mapping to 'turn left'")
                     elif "forward" in extracted_action:
                         potential_action = "go forward"
-                        logging.debug(f"Found keyword 'forward' in text, mapping to 'go forward'")
+                        logging.debug("Found keyword 'forward' in text, mapping to 'go forward'")
                     elif "pick" in extracted_action:
                         potential_action = "pick up"
-                        logging.debug(f"Found keyword 'pick' in text, mapping to 'pick up'")
+                        logging.debug("Found keyword 'pick' in text, mapping to 'pick up'")
                 
                 if potential_action:
                     extracted_action = potential_action
