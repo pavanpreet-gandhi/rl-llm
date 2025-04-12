@@ -12,7 +12,7 @@ class EnvManager:
         invalid_action_penalty: float = -0.1, 
         consecutive_invalid_actions_allowed: int = 5, 
         reasoning_flag: bool = False,
-        num_dists: int = 0
+        num_dists: int = 0,
     ):
         self.env_ids = env_ids
         self.invalid_action_penalty = invalid_action_penalty
