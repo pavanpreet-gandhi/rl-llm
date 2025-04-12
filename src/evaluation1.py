@@ -18,7 +18,6 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 # Suppress transformers logging to ERROR level
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
-
 # Configure logging
 logging.basicConfig(
     filename="outputs/logs/evaluation.log",
@@ -38,7 +37,7 @@ def evaluate(
     env_id: str,
     context_window: int,
     num_envs: int = 1,
-    num_episodes: int = 5,  # Reduced for debugging
+    num_episodes: int = 5,
     reasoning_flag: bool = False,
     generation_kwargs: dict = None,
     device: torch.device = None,
@@ -49,7 +48,7 @@ def evaluate(
 ) -> Dict[str, Any]:
     if generation_kwargs is None:
         generation_kwargs = {
-            "max_new_tokens": 20,
+            "max_new_tokens": 50,
             "do_sample": True,
             "top_k": 50,
             "top_p": 0.95,
@@ -172,22 +171,25 @@ def evaluate(
 def plot_performance(
     env_ids: List[str],
     context_window: int,
-    baseline_results: Dict[str, float],
+    baseline_non_reasoning_results: Dict[str, float],
+    baseline_reasoning_results: Dict[str, float],
     reasoning_results: Dict[str, float],
     non_reasoning_results: Dict[str, float],
     env_type: str,
     checkpoint_name: str,
 ):
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
     n_envs = len(env_ids)
-    bar_width = 0.25
+    bar_width = 0.2
     index = np.arange(n_envs)
 
-    ax.bar(index - bar_width, [baseline_results[env_id] for env_id in env_ids], 
-           bar_width, label="Baseline (Untrained)", color='red', alpha=0.7)
-    ax.bar(index, [reasoning_results[env_id] for env_id in env_ids], 
+    ax.bar(index - bar_width * 1.5, [baseline_non_reasoning_results[env_id] for env_id in env_ids], 
+           bar_width, label="Baseline (Non-Reasoning)", color='red', alpha=0.7)
+    ax.bar(index - bar_width * 0.5, [baseline_reasoning_results[env_id] for env_id in env_ids], 
+           bar_width, label="Baseline (Reasoning)", color='orange', alpha=0.7)
+    ax.bar(index + bar_width * 0.5, [reasoning_results[env_id] for env_id in env_ids], 
            bar_width, label="Reasoning (Trained)", color='blue', alpha=0.7)
-    ax.bar(index + bar_width, [non_reasoning_results[env_id] for env_id in env_ids], 
+    ax.bar(index + bar_width * 1.5, [non_reasoning_results[env_id] for env_id in env_ids], 
            bar_width, label="Non-Reasoning (Trained)", color='green', alpha=0.7)
 
     ax.set_xlabel("Environments", fontsize=12)
@@ -209,18 +211,18 @@ def evaluate_models(
     models_info: List[Dict[str, Any]],
     seen_env_ids: List[str],
     unseen_env_ids: List[str],
-    context_windows: List[int] = [5],
-    num_envs: int = 1,  # Reduced for debugging
-    num_episodes: int = 5,  # Reduced for debugging
+    context_window: int = 5,
+    num_envs: int = 1,
+    num_episodes: int = 5,
     generation_kwargs: dict = None,
     device: torch.device = None,
     invalid_action_penalty: float = -2.0,
     consecutive_invalid_actions_allowed: int = 5,
     step_offset: int = 0,
-) -> Dict[str, Dict[str, Dict[int, Dict[str, Any]]]]:
+) -> tuple[Dict[str, Dict[str, Dict[int, Dict[str, Any]]]], Dict[str, Dict[str, Dict[int, Dict[str, float]]]]]:
     if generation_kwargs is None:
         generation_kwargs = {
-            "max_new_tokens": 20,
+            "max_new_tokens": 50,
             "do_sample": True,
             "top_k": 50,
             "top_p": 0.95,
@@ -247,47 +249,85 @@ def evaluate_models(
     baseline_results = {"seen": {}, "unseen": {}}
     for env_id in seen_env_ids:
         baseline_results["seen"][env_id] = {}
-        for context_window in context_windows:
-            print(f"\n=== Evaluating baseline model on seen env {env_id} with context {context_window} ===")
-            result = evaluate(
-                model=baseline_model_info['model'],
-                tokenizer=baseline_model_info['tokenizer'],
-                env_id=env_id,
-                context_window=context_window,
-                num_envs=num_envs,
-                num_episodes=num_episodes,
-                reasoning_flag=False,
-                generation_kwargs=generation_kwargs,
-                device=device,
-                invalid_action_penalty=invalid_action_penalty,
-                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
-                model_name=baseline_model_info['name'],
-                step_offset=current_step,
-            )
-            baseline_results["seen"][env_id][context_window] = result["final_metrics"]["success_rate"]
-            current_step += num_episodes
+        baseline_results["seen"][env_id][context_window] = {}
+        print(f"\n=== Evaluating baseline model (non-reasoning) on seen env {env_id} with context {context_window} ===")
+        non_reasoning_result = evaluate(
+            model=baseline_model_info['model'],
+            tokenizer=baseline_model_info['tokenizer'],
+            env_id=env_id,
+            context_window=context_window,
+            num_envs=num_envs,
+            num_episodes=num_episodes,
+            reasoning_flag=False,
+            generation_kwargs=generation_kwargs,
+            device=device,
+            invalid_action_penalty=invalid_action_penalty,
+            consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+            model_name=baseline_model_info['name'] + "-non-reasoning",
+            step_offset=current_step,
+        )
+        baseline_results["seen"][env_id][context_window]["non_reasoning"] = non_reasoning_result["final_metrics"]["success_rate"]
+        current_step += num_episodes
+
+        print(f"\n=== Evaluating baseline model (reasoning) on seen env {env_id} with context {context_window} ===")
+        reasoning_result = evaluate(
+            model=baseline_model_info['model'],
+            tokenizer=baseline_model_info['tokenizer'],
+            env_id=env_id,
+            context_window=context_window,
+            num_envs=num_envs,
+            num_episodes=num_episodes,
+            reasoning_flag=True,
+            generation_kwargs=generation_kwargs,
+            device=device,
+            invalid_action_penalty=invalid_action_penalty,
+            consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+            model_name=baseline_model_info['name'] + "-reasoning",
+            step_offset=current_step,
+        )
+        baseline_results["seen"][env_id][context_window]["reasoning"] = reasoning_result["final_metrics"]["success_rate"]
+        current_step += num_episodes
 
     for env_id in unseen_env_ids:
         baseline_results["unseen"][env_id] = {}
-        for context_window in context_windows:
-            print(f"\n=== Evaluating baseline model on unseen env {env_id} with context {context_window} ===")
-            result = evaluate(
-                model=baseline_model_info['model'],
-                tokenizer=baseline_model_info['tokenizer'],
-                env_id=env_id,
-                context_window=context_window,
-                num_envs=num_envs,
-                num_episodes=num_episodes,
-                reasoning_flag=False,
-                generation_kwargs=generation_kwargs,
-                device=device,
-                invalid_action_penalty=invalid_action_penalty,
-                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
-                model_name=baseline_model_info['name'],
-                step_offset=current_step,
-            )
-            baseline_results["unseen"][env_id][context_window] = result["final_metrics"]["success_rate"]
-            current_step += num_episodes
+        baseline_results["unseen"][env_id][context_window] = {}
+        print(f"\n=== Evaluating baseline model (non-reasoning) on unseen env {env_id} with context {context_window} ===")
+        non_reasoning_result = evaluate(
+            model=baseline_model_info['model'],
+            tokenizer=baseline_model_info['tokenizer'],
+            env_id=env_id,
+            context_window=context_window,
+            num_envs=num_envs,
+            num_episodes=num_episodes,
+            reasoning_flag=False,
+            generation_kwargs=generation_kwargs,
+            device=device,
+            invalid_action_penalty=invalid_action_penalty,
+            consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+            model_name=baseline_model_info['name'] + "-non-reasoning",
+            step_offset=current_step,
+        )
+        baseline_results["unseen"][env_id][context_window]["non_reasoning"] = non_reasoning_result["final_metrics"]["success_rate"]
+        current_step += num_episodes
+
+        print(f"\n=== Evaluating baseline model (reasoning) on unseen env {env_id} with context {context_window} ===")
+        reasoning_result = evaluate(
+            model=baseline_model_info['model'],
+            tokenizer=baseline_model_info['tokenizer'],
+            env_id=env_id,
+            context_window=context_window,
+            num_envs=num_envs,
+            num_episodes=num_episodes,
+            reasoning_flag=True,
+            generation_kwargs=generation_kwargs,
+            device=device,
+            invalid_action_penalty=invalid_action_penalty,
+            consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+            model_name=baseline_model_info['name'] + "-reasoning",
+            step_offset=current_step,
+        )
+        baseline_results["unseen"][env_id][context_window]["reasoning"] = reasoning_result["final_metrics"]["success_rate"]
+        current_step += num_episodes
 
     # Evaluate trained models
     for model_info in models_info:
@@ -302,114 +342,117 @@ def evaluate_models(
 
         for env_id in seen_env_ids:
             results[model_name]["seen"][env_id] = {}
-            for context_window in context_windows:
-                print(f"\n=== Evaluating {model_name} on seen env {env_id} with context {context_window} ===")
-                reasoning_result = evaluate(
-                    model=model,
-                    tokenizer=tokenizer,
-                    env_id=env_id,
-                    context_window=context_window,
-                    num_envs=num_envs,
-                    num_episodes=num_episodes,
-                    reasoning_flag=True,
-                    generation_kwargs=generation_kwargs,
-                    device=device,
-                    invalid_action_penalty=invalid_action_penalty,
-                    consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
-                    model_name=model_name,
-                    step_offset=current_step,
-                )
-                non_reasoning_result = evaluate(
-                    model=model,
-                    tokenizer=tokenizer,
-                    env_id=env_id,
-                    context_window=context_window,
-                    num_envs=num_envs,
-                    num_episodes=num_episodes,
-                    reasoning_flag=False,
-                    generation_kwargs=generation_kwargs,
-                    device=device,
-                    invalid_action_penalty=invalid_action_penalty,
-                    consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
-                    model_name=model_name,
-                    step_offset=current_step + num_episodes,
-                )
-                results[model_name]["seen"][env_id][context_window] = {
-                    "reasoning": reasoning_result["final_metrics"],
-                    "non_reasoning": non_reasoning_result["final_metrics"],
-                }
-                current_step += 2 * num_episodes
+            results[model_name]["seen"][env_id][context_window] = {}
+            print(f"\n=== Evaluating {model_name} on seen env {env_id} with context {context_window} ===")
+            reasoning_result = evaluate(
+                model=model,
+                tokenizer=tokenizer,
+                env_id=env_id,
+                context_window=context_window,
+                num_envs=num_envs,
+                num_episodes=num_episodes,
+                reasoning_flag=True,
+                generation_kwargs=generation_kwargs,
+                device=device,
+                invalid_action_penalty=invalid_action_penalty,
+                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+                model_name=model_name + "-reasoning",
+                step_offset=current_step,
+            )
+            non_reasoning_result = evaluate(
+                model=model,
+                tokenizer=tokenizer,
+                env_id=env_id,
+                context_window=context_window,
+                num_envs=num_envs,
+                num_episodes=num_episodes,
+                reasoning_flag=False,
+                generation_kwargs=generation_kwargs,
+                device=device,
+                invalid_action_penalty=invalid_action_penalty,
+                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+                model_name=model_name + "-non-reasoning",
+                step_offset=current_step + num_episodes,
+            )
+            results[model_name]["seen"][env_id][context_window] = {
+                "reasoning": reasoning_result["final_metrics"],
+                "non_reasoning": non_reasoning_result["final_metrics"],
+            }
+            current_step += 2 * num_episodes
 
         for env_id in unseen_env_ids:
             results[model_name]["unseen"][env_id] = {}
-            for context_window in context_windows:
-                print(f"\n=== Evaluating {model_name} on unseen env {env_id} with context {context_window} ===")
-                reasoning_result = evaluate(
-                    model=model,
-                    tokenizer=tokenizer,
-                    env_id=env_id,
-                    context_window=context_window,
-                    num_envs=num_envs,
-                    num_episodes=num_episodes,
-                    reasoning_flag=True,
-                    generation_kwargs=generation_kwargs,
-                    device=device,
-                    invalid_action_penalty=invalid_action_penalty,
-                    consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
-                    model_name=model_name,
-                    step_offset=current_step,
-                )
-                non_reasoning_result = evaluate(
-                    model=model,
-                    tokenizer=tokenizer,
-                    env_id=env_id,
-                    context_window=context_window,
-                    num_envs=num_envs,
-                    num_episodes=num_episodes,
-                    reasoning_flag=False,
-                    generation_kwargs=generation_kwargs,
-                    device=device,
-                    invalid_action_penalty=invalid_action_penalty,
-                    consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
-                    model_name=model_name,
-                    step_offset=current_step + num_episodes,
-                )
-                results[model_name]["unseen"][env_id][context_window] = {
-                    "reasoning": reasoning_result["final_metrics"],
-                    "non_reasoning": non_reasoning_result["final_metrics"],
-                }
-                current_step += 2 * num_episodes
-
-        for context_window in context_windows:
-            seen_baseline = {env_id: baseline_results["seen"][env_id][context_window] for env_id in seen_env_ids}
-            seen_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in seen_env_ids}
-            seen_non_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in seen_env_ids}
-
-            plot_performance(
-                env_ids=seen_env_ids,
+            results[model_name]["unseen"][env_id][context_window] = {}
+            print(f"\n=== Evaluating {model_name} on unseen env {env_id} with context {context_window} ===")
+            reasoning_result = evaluate(
+                model=model,
+                tokenizer=tokenizer,
+                env_id=env_id,
                 context_window=context_window,
-                baseline_results=seen_baseline,
-                reasoning_results=seen_reasoning,
-                non_reasoning_results=seen_non_reasoning,
-                env_type="Seen",
-                checkpoint_name=checkpoint_name,
+                num_envs=num_envs,
+                num_episodes=num_episodes,
+                reasoning_flag=True,
+                generation_kwargs=generation_kwargs,
+                device=device,
+                invalid_action_penalty=invalid_action_penalty,
+                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+                model_name=model_name + "-reasoning",
+                step_offset=current_step,
             )
-
-            unseen_baseline = {env_id: baseline_results["unseen"][env_id][context_window] for env_id in unseen_env_ids}
-            unseen_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in unseen_env_ids}
-            unseen_non_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in unseen_env_ids}
-
-            plot_performance(
-                env_ids=unseen_env_ids,
+            non_reasoning_result = evaluate(
+                model=model,
+                tokenizer=tokenizer,
+                env_id=env_id,
                 context_window=context_window,
-                baseline_results=unseen_baseline,
-                reasoning_results=unseen_reasoning,
-                non_reasoning_results=unseen_non_reasoning,
-                env_type="Unseen",
-                checkpoint_name=checkpoint_name,
+                num_envs=num_envs,
+                num_episodes=num_episodes,
+                reasoning_flag=False,
+                generation_kwargs=generation_kwargs,
+                device=device,
+                invalid_action_penalty=invalid_action_penalty,
+                consecutive_invalid_actions_allowed=consecutive_invalid_actions_allowed,
+                model_name=model_name + "-non-reasoning",
+                step_offset=current_step + num_episodes,
             )
+            results[model_name]["unseen"][env_id][context_window] = {
+                "reasoning": reasoning_result["final_metrics"],
+                "non_reasoning": non_reasoning_result["final_metrics"],
+            }
+            current_step += 2 * num_episodes
 
-    return results
+        seen_baseline_non_reasoning = {env_id: baseline_results["seen"][env_id][context_window]["non_reasoning"] for env_id in seen_env_ids}
+        seen_baseline_reasoning = {env_id: baseline_results["seen"][env_id][context_window]["reasoning"] for env_id in seen_env_ids}
+        seen_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in seen_env_ids}
+        seen_non_reasoning = {env_id: results[model_name]["seen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in seen_env_ids}
+
+        plot_performance(
+            env_ids=seen_env_ids,
+            context_window=context_window,
+            baseline_non_reasoning_results=seen_baseline_non_reasoning,
+            baseline_reasoning_results=seen_baseline_reasoning,
+            reasoning_results=seen_reasoning,
+            non_reasoning_results=seen_non_reasoning,
+            env_type="Seen",
+            checkpoint_name=checkpoint_name,
+        )
+
+        unseen_baseline_non_reasoning = {env_id: baseline_results["unseen"][env_id][context_window]["non_reasoning"] for env_id in unseen_env_ids}
+        unseen_baseline_reasoning = {env_id: baseline_results["unseen"][env_id][context_window]["reasoning"] for env_id in unseen_env_ids}
+        unseen_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["reasoning"]["success_rate"] for env_id in unseen_env_ids}
+        unseen_non_reasoning = {env_id: results[model_name]["unseen"][env_id][context_window]["non_reasoning"]["success_rate"] for env_id in unseen_env_ids}
+
+        plot_performance(
+            env_ids=unseen_env_ids,
+            context_window=context_window,
+            baseline_non_reasoning_results=unseen_baseline_non_reasoning,
+            baseline_reasoning_results=unseen_baseline_reasoning,
+            reasoning_results=unseen_reasoning,
+            non_reasoning_results=unseen_non_reasoning,
+            env_type="Unseen",
+            checkpoint_name=checkpoint_name,
+        )
+
+    return results, baseline_results
 
 # Load baseline model
 baseline_model = AutoModelForCausalLMWithValueHead.from_pretrained(
@@ -431,7 +474,7 @@ models_info = [
     }
 ]
 
-# Checkpoints (reduced for debugging)
+# Checkpoints
 checkpoints = [
     ("pavanpreet-gandhi/babyai-classical-ppo-prefinal-experiments-2025-04-11_13-38-03", "3a698a6adce4838068348f97e87dafddbf05be2d"),  # Checkpoint 160
 ]
@@ -460,26 +503,28 @@ for model_info in models_info:
 seen_env_ids = ["BabyAI-GoTo-v0", "BabyAI-Pickup-v0"]
 unseen_env_ids = ["BabyAI-Open-v0"]
 
-# Run evaluation
-results = evaluate_models(
+# Run evaluation with a single context window
+context_window = 5
+results, baseline_results = evaluate_models(
     models_info=models_info,
     seen_env_ids=seen_env_ids,
     unseen_env_ids=unseen_env_ids,
-    context_windows=[5],
-    num_episodes=5,
+    context_window=context_window,
+    num_episodes=20,
 )
 
 # Summary logging
 summary_file = "outputs/logs/evaluation_summary.txt"
 with open(summary_file, "w") as f:
     f.write("=== Evaluation Summary ===\n")
+    # Log trained model results
     for model_name, env_types in results.items():
         f.write(f"{model_name}:\n")
         for env_type, env_results in env_types.items():
             f.write(f"  {env_type}:\n")
             for env_id, context_results in env_results.items():
-                for context_window, metrics in context_results.items():
-                    f.write(f"    {model_name} on {env_id} ({env_type}) with context {context_window}:\n")
+                for cw, metrics in context_results.items():
+                    f.write(f"    {model_name} on {env_id} ({env_type}) with context {cw}:\n")
                     for metric_type, metric_values in metrics.items():
                         f.write(f"      {metric_type}:\n")
                         for metric_name, value in metric_values.items():
@@ -489,5 +534,17 @@ with open(summary_file, "w") as f:
                                 f.write(f"        {metric_name}: {value:.4f} ± {std_value:.4f}\n")
                             else:
                                 f.write(f"        {metric_name}: {value:.4f}\n")
+    
+    # Log baseline results
+    f.write("\nBaseline Model:\n")
+    for env_type in ["seen", "unseen"]:
+        f.write(f"  {env_type}:\n")
+        env_ids = seen_env_ids if env_type == "seen" else unseen_env_ids
+        for env_id in env_ids:
+            f.write(f"    llama-3.2-3b-baseline on {env_id} ({env_type}) with context {context_window}:\n")
+            for metric_type in ["non_reasoning", "reasoning"]:
+                success_rate = baseline_results[env_type][env_id][context_window][metric_type]
+                f.write(f"      {metric_type}:\n")
+                f.write(f"        success_rate: {success_rate:.4f}\n")
     f.write("\n")
 print(f"Evaluation summary logged to {summary_file}")

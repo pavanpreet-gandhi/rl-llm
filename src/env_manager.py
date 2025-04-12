@@ -16,8 +16,8 @@ class EnvManager:
     def __init__(
         self,
         env_ids: List[str], 
-        invalid_action_penalty: float = -0.1, 
-        consecutive_invalid_actions_allowed: int = 5, 
+        invalid_action_penalty: float = -2.0, 
+        consecutive_invalid_actions_allowed: int = 7, 
         reasoning_flag: bool = False
     ):
         self.env_ids = env_ids
@@ -25,6 +25,7 @@ class EnvManager:
         self.consecutive_invalid_actions_allowed = consecutive_invalid_actions_allowed
         self.consecutive_invalid_actions = 0
         self.reasoning_flag = reasoning_flag
+        self.last_observation = ""
     
     def reset(self) -> Tuple[str, str]:
         self.env_id = random.choice(self.env_ids)
@@ -33,22 +34,97 @@ class EnvManager:
         obs, info = self.env.reset()
         mission = obs["mission"]
         text_obs = "\n".join(info["descriptions"])
+        self.last_observation = text_obs
         logging.info(f"Reset env {self.env_id} with mission: {mission}")
         return mission, text_obs
     
     def step(self, text_action: str) -> Tuple[str, float, bool]:
         logging.debug(f"Raw text_action (reasoning={self.reasoning_flag}): '{text_action}'")
         
+        # Action variation mapping
+        action_variations = {
+            "move forward": "go forward",
+            "forward": "go forward",
+            "move left": "turn left",
+            "left": "turn left",
+            "move right": "turn right",
+            "right": "turn right",
+            "pickup": "pick up",
+            "choose to turn left": "turn left",
+            "choose to turn right": "turn right",
+            "i should turn left": "turn left",
+            "i should turn right": "turn right",
+            "turn left now": "turn left",
+            "turn right now": "turn right",
+            "move 1 step right": "turn right",
+            "move 1 step left": "turn left",
+            "move 2 steps forward": "go forward",
+            "can move 1 step right": "turn right",
+            "to go forward": "go forward",
+            "i need to move to the right": "turn right",
+            "i need to move to the left": "turn left",
+        }
+        
         if self.reasoning_flag:
             # Case-insensitive search for "final answer:"
-            match = re.search(r"final answer:\s*(.*)", text_action, re.IGNORECASE)
+            match = re.search(r"final answer:\s*(.*?)(?:\n|$)", text_action, re.IGNORECASE)
             if match:
                 extracted_action = match.group(1).strip()
                 logging.debug(f"Extracted action after 'final answer:': '{extracted_action}'")
             else:
-                extracted_action = text_action.strip()
-                logging.debug(f"No 'final answer:' found, using: '{extracted_action}'")
+                # Fallback: Search for action-like keywords in the text
+                extracted_action = text_action.lower().strip()
+                potential_action = None
+                
+                # Check for direct variations first
+                for variation, standard in action_variations.items():
+                    if variation in extracted_action:
+                        potential_action = standard
+                        logging.debug(f"Found variation '{variation}' in text, mapping to '{standard}'")
+                        break
+                
+                # If no variation found, look for keywords like 'right', 'left', 'forward'
+                if not potential_action:
+                    if "right" in extracted_action:
+                        potential_action = "turn right"
+                        logging.debug(f"Found keyword 'right' in text, mapping to 'turn right'")
+                    elif "left" in extracted_action:
+                        potential_action = "turn left"
+                        logging.debug(f"Found keyword 'left' in text, mapping to 'turn left'")
+                    elif "forward" in extracted_action:
+                        potential_action = "go forward"
+                        logging.debug(f"Found keyword 'forward' in text, mapping to 'go forward'")
+                    elif "pick" in extracted_action:
+                        potential_action = "pick up"
+                        logging.debug(f"Found keyword 'pick' in text, mapping to 'pick up'")
+                
+                if potential_action:
+                    extracted_action = potential_action
+                    logging.debug(f"Extracted action from text: '{extracted_action}'")
+                else:
+                    # Split into lines and check the last line for any action
+                    lines = extracted_action.split('\n')
+                    for line in reversed(lines):
+                        line = line.strip()
+                        for variation, standard in action_variations.items():
+                            if variation in line:
+                                extracted_action = standard
+                                logging.debug(f"Found variation '{variation}' in last line, mapping to '{standard}'")
+                                break
+                        if extracted_action != text_action.lower().strip():
+                            break
+                    if extracted_action == text_action.lower().strip():
+                        logging.debug(f"No valid action found, using: '{extracted_action}'")
             
+            # Apply variation mapping if needed
+            extracted_action_lower = extracted_action.lower()
+            for variation, standard in action_variations.items():
+                if variation == extracted_action_lower:
+                    extracted_action = standard
+                    logging.debug(f"Mapped variation '{variation}' to '{standard}'")
+                    break
+            
+            # Map to environment action
             action = utils.text_to_action.get(extracted_action, None)
             logging.debug(f"Mapped action: {action}")
             
@@ -59,7 +135,8 @@ class EnvManager:
                     f"Consecutive invalid actions: {self.consecutive_invalid_actions}"
                 )
                 invalid_action_message = (
-                    "Invalid format or action. Think step-by-step and end your response with 'final answer: [answer]', where [answer] is one of: "
+                    f"Invalid format or action. Current observation: {self.last_observation}\n"
+                    "Think step-by-step (max 10 words) and end with 'final answer: [action]', where [action] is one of: "
                     + ", ".join(utils.text_to_action.keys())
                     + ".\n"
                 )
@@ -73,9 +150,17 @@ class EnvManager:
             else:
                 obs, reward, done, info = self.env.step(action)
                 text_obs = "\n".join(info["descriptions"])
+                self.last_observation = text_obs
+                self.consecutive_invalid_actions = 0  # Reset on valid action
                 logging.debug(f"Valid action executed: {action}, Reward: {reward}, Done: {done}")
         else:
             extracted_action = text_action.strip()
+            extracted_action_lower = extracted_action.lower()
+            for variation, standard in action_variations.items():
+                if variation == extracted_action_lower:
+                    extracted_action = standard
+                    logging.debug(f"Mapped non-reasoning variation '{variation}' to '{standard}'")
+                    break
             action = utils.text_to_action.get(extracted_action, None)
             logging.debug(f"Non-reasoning action: '{extracted_action}', Mapped action: {action}")
             
@@ -86,10 +171,11 @@ class EnvManager:
                     f"Consecutive invalid actions: {self.consecutive_invalid_actions}"
                 )
                 invalid_action_message = (
-                    "Invalid action, the valid actions are: "
+                    f"Invalid action. Current observation: {self.last_observation}\n"
+                    "Valid actions are: "
                     + ", ".join(utils.text_to_action.keys())
                     + ".\n"
-                    "Please output one of the above actions and nothing else."
+                    "Output one action only."
                 )
                 text_obs = invalid_action_message
                 reward = self.invalid_action_penalty
@@ -101,6 +187,8 @@ class EnvManager:
             else:
                 obs, reward, done, info = self.env.step(action)
                 text_obs = "\n".join(info["descriptions"])
+                self.last_observation = text_obs
+                self.consecutive_invalid_actions = 0  # Reset on valid action
                 logging.debug(f"Valid non-reasoning action executed: {action}, Reward: {reward}, Done: {done}")
         
         return text_obs, reward, done
