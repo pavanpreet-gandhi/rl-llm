@@ -71,7 +71,7 @@ def parse_args() -> Dict[str, Any]:
         "context_window": 5,
         "reasoning_flag": True,
         "hide_invalid_action_in_context": True,
-        "num_dists": 0,
+        "num_dists": 3,
         # Generation kwargs
         "min_length": -1,  # don't ignore the EOS token
         "top_k": 50,  # no top-k sampling
@@ -90,7 +90,7 @@ def parse_args() -> Dict[str, Any]:
         "lam": 0.95,
         "exclude_invalid_actions": True
     }
-    args['experiment_name'] = ('No_Reasoning_' if not args['reasoning_flag'] else 'Reasoning_') + f"_trial_{args['trial_num']}"
+    args['experiment_name'] = ('No_Reasoning' if not args['reasoning_flag'] else 'Reasoning') + f"_trial_{args['trial_num']}" + f"_dist_{args['num_dists']}"
     args = SimpleNamespace(**args)  # same type as argparse would return
     return args
 
