@@ -750,7 +750,7 @@ class Level_GoToTest(LevelGen):
         self.agent_dir = 0
 
 
-class Level_Pickup(LevelGen):
+class Level_PickupTest(LevelGen):
     """
     PickUp instruction from MixedTrainLocal.
     The agent does not need to move objects around.
