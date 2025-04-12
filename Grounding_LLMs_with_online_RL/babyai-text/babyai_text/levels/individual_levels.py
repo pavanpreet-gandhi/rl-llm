@@ -22,7 +22,8 @@ class Level_GoTo(LevelGen):
             num_rows=1,
             num_cols=1,
             num_dists=8,
-            seed=None
+            seed=None,
+            test_mode=False
     ):
         # We add many distractors to increase the probability
         # of ambiguous locations within the same room
@@ -38,6 +39,7 @@ class Level_GoTo(LevelGen):
             unblocking=False,
             implicit_unlock=False
         )
+        self.test_mode = test_mode
 
     def gen_mission(self):
         mission_accepted = False
@@ -57,10 +59,18 @@ class Level_GoTo(LevelGen):
         # True if contains excluded substring
         list_exclude_combinaison = ["yellow box", "red key", "red door", "green ball", "grey door"]
 
-        for sub_str in list_exclude_combinaison:
-            if sub_str in self.instrs.surface(self):
+        if not self.test_mode:
+            for sub_str in list_exclude_combinaison:
+                if sub_str in self.instrs.surface(self):
+                    return True
+            return False
+        else:
+            # We want to test the model on the excluded substrings
+            if self.instrs.desc.surface(self) in list_exclude_combinaison:
+                return False
+            else:
                 return True
-        return False
+            
 
     def _regen_grid(self):
         # Create the grid
@@ -138,7 +148,8 @@ class Level_Pickup(LevelGen):
             num_rows=1,
             num_cols=1,
             num_dists=8,
-            seed=None
+            seed=None,
+            test_mode=False
     ):
         # We add many distractors to increase the probability
         # of ambiguous locations within the same room
@@ -154,6 +165,7 @@ class Level_Pickup(LevelGen):
             unblocking=False,
             implicit_unlock=False
         )
+        self.test_mode = test_mode
 
     def gen_mission(self):
         mission_accepted = False
@@ -175,10 +187,17 @@ class Level_Pickup(LevelGen):
         # True if contains excluded substring
         list_exclude_combinaison = ["yellow box", "red key", "red door", "green ball", "grey door"]
 
-        for sub_str in list_exclude_combinaison:
-            if sub_str in self.instrs.surface(self):
+        if not self.test_mode:
+            for sub_str in list_exclude_combinaison:
+                if sub_str in self.instrs.surface(self):
+                    return True
+            return False
+        else:
+            # We want to test the model on the excluded substrings
+            if self.instrs.desc.surface(self) in list_exclude_combinaison:
+                return False
+            else:
                 return True
-        return False
 
     def _regen_grid(self):
         # Create the grid
@@ -256,7 +275,8 @@ class Level_Open(LevelGen):
             num_rows=1,
             num_cols=2,  # Always 2 columns for Open task
             num_dists=8,
-            seed=None
+            seed=None,
+            test_mode=False
     ):
         # We add many distractors to increase the probability
         # of ambiguous locations within the same room
@@ -272,6 +292,7 @@ class Level_Open(LevelGen):
             unblocking=False,
             implicit_unlock=False
         )
+        self.test_mode = test_mode
 
     def gen_mission(self):
         mission_accepted = False
@@ -310,10 +331,17 @@ class Level_Open(LevelGen):
         # True if contains excluded substring
         list_exclude_combinaison = ["yellow box", "red key", "red door", "green ball", "grey door"]
 
-        for sub_str in list_exclude_combinaison:
-            if sub_str in self.instrs.surface(self):
+        if not self.test_mode:
+            for sub_str in list_exclude_combinaison:
+                if sub_str in self.instrs.surface(self):
+                    return True
+            return False
+        else:
+            # We want to test the model on the excluded substrings
+            if self.instrs.desc.surface(self) in list_exclude_combinaison:
+                return False
+            else:
                 return True
-        return False
 
     def _regen_grid(self):
         # Create the grid
@@ -391,7 +419,8 @@ class Level_PutNext(LevelGen):
             num_rows=1,
             num_cols=1,
             num_dists=8,
-            seed=None
+            seed=None,
+            test_mode=False
     ):
         # We add many distractors to increase the probability
         # of ambiguous locations within the same room
@@ -407,6 +436,7 @@ class Level_PutNext(LevelGen):
             unblocking=False,
             implicit_unlock=False
         )
+        self.test_mode = test_mode
 
     def gen_mission(self):
         mission_accepted = False
@@ -437,10 +467,18 @@ class Level_PutNext(LevelGen):
         # True if contains excluded substring
         list_exclude_combinaison = ["yellow box", "red key", "red door", "green ball", "grey door"]
 
-        for sub_str in list_exclude_combinaison:
-            if sub_str in self.instrs.surface(self):
+        if not self.test_mode:
+            for sub_str in list_exclude_combinaison:
+                if sub_str in self.instrs.surface(self):
+                    return True
+            return False
+        else:
+            # We want to test the model on the excluded substrings
+            if self.instrs.desc_move.surface(self) in list_exclude_combinaison and \
+                    self.instrs.desc_fixed.surface(self) in list_exclude_combinaison:
+                return False
+            else:
                 return True
-        return False
 
     def _regen_grid(self):
         # Create the grid
@@ -518,7 +556,8 @@ class Level_PickUpSeqGoTo(LevelGen):
             num_rows=1,
             num_cols=1,
             num_dists=8,
-            seed=None
+            seed=None,
+            test_mode=False
     ):
         # We add many distractors to increase the probability
         # of ambiguous locations within the same room
@@ -534,6 +573,7 @@ class Level_PickUpSeqGoTo(LevelGen):
             unblocking=False,
             implicit_unlock=False
         )
+        self.test_mode = test_mode
 
     def gen_mission(self):
         mission_accepted = False
@@ -571,10 +611,18 @@ class Level_PickUpSeqGoTo(LevelGen):
         # True if contains excluded substring
         list_exclude_combinaison = ["yellow box", "red key", "red door", "green ball", "grey door"]
 
-        for sub_str in list_exclude_combinaison:
-            if sub_str in self.instrs.surface(self):
+        if not self.test_mode:
+            for sub_str in list_exclude_combinaison:
+                if sub_str in self.instrs.surface(self):
+                    return True
+            return False
+        else:
+            # We want to test the model on the excluded substrings
+            if self.instrs.instr_a.desc.surface(self) in list_exclude_combinaison and \
+                self.instrs.instr_b.desc.surface(self) in list_exclude_combinaison:
+                return False
+            else:
                 return True
-        return False
 
     def _regen_grid(self):
         # Create the grid
