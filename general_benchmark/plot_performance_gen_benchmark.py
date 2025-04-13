@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 # Step 1: Read and clean data
-df_raw = pd.read_csv("/workspace/rl-llm/performance_summary.csv", skip_blank_lines=True)
+df_raw = pd.read_csv("general_benchmark/performance_summary.csv", skip_blank_lines=True)
 df_cleaned = df_raw[df_raw["Model ID"] != "Model ID"].copy()
 df_cleaned["Accuracy"] = df_cleaned["Accuracy"].astype(float)
 
@@ -12,7 +12,8 @@ df_cleaned["Accuracy"] = df_cleaned["Accuracy"].astype(float)
 df_cleaned["Model Label"] = df_cleaned["Model ID"].str.extract(r'final_runs-(.*)')
 df_cleaned["Group Label"] = df_cleaned["Model Label"].str.replace(r"__trial_\d+", "", regex=True)
 df_cleaned["Group Label"] = df_cleaned["Group Label"].str.replace(r"_trial_\d+(_dist_\d+)?", r"\1", regex=True)
-
+breakpoint()
+df_cleaned = pd.concat([df_cleaned, df_raw.iloc[0:2]])
 # Step 3: Aggregate mean, min, max
 agg_df = df_cleaned.groupby(["Group Label", "Dataset"])["Accuracy"].agg(['min', 'max', 'mean']).reset_index()
 
