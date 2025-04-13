@@ -51,31 +51,23 @@ def sample_episodes(
         # Time tokenization and generation
         start_time = time.time()
 
-        # Clip contexts to the last context_window observations (keep the first system message)
-        clipped_contexts = []
+        # Clip contexts and create query tensors
+        queries = []
         for context in contexts:
             if len(context) > (2 * context_window + 1):
-                clipped_context = [context[0]] + context[-(2*context_window)+1:]
+                clipped_context = [context[0]] + context[-(2 * context_window) + 1 :]
             else:
                 clipped_context = context
-            clipped_contexts.append(clipped_context)
-
-        # Create queries
-        queries = tokenizer.apply_chat_template(
-            clipped_contexts, 
-            padding=True,
-            return_tensors="pt", 
-            add_generation_prompt=True
-        ).to(device)
-        attention_mask = (queries != tokenizer.pad_token_id).long()
+            this_query = tokenizer.apply_chat_template(
+                clipped_context, return_tensors="pt", add_generation_prompt=True
+            ).squeeze(0)
+            queries.append(this_query)
 
         # Generate responses
         output = model.generate(
-            queries,
-            attention_mask=attention_mask,
-            **generation_kwargs,
+            queries, generation_kwargs=generation_kwargs, return_prompt=False
         )
-        responses = output[:, queries.shape[-1]:]
+        responses = output
 
         # Extract actions
         actions = tokenizer.batch_decode(
