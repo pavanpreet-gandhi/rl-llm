@@ -65,21 +65,17 @@ def sample_batch(
     if logger is None:
         print("train logger is None")
 
-    # remove the cut off / today date from the chat template NOT WORKING
-    if tokenizer.chat_template:
-        # print("=== BEFORE ===")
-        # print(tokenizer.chat_template)
-        a = tokenizer.chat_template
-        # Remove the literal Jinja2 lines that print those date strings
-        tokenizer.chat_template = tokenizer.chat_template.replace(
-            '{{- "Cutting Knowledge Date: December 2023\\n" }}\n', ""
-        )
-        tokenizer.chat_template = tokenizer.chat_template.replace(
-            '{{- "Today Date: " + date_string + "\\n\\n" }}\n', ""
-        )
-        # breakpoint()
-        # print("=== AFTER ===")
-        # print(tokenizer.chat_template)
+    # Ensure chat_template exists before attempting modifications
+    if hasattr(tokenizer, "chat_template") and tokenizer.chat_template:
+        try:
+            tokenizer.chat_template = tokenizer.chat_template.replace(
+                '{{- "Cutting Knowledge Date: December 2023\\n" }}\n', ""
+            )
+            tokenizer.chat_template = tokenizer.chat_template.replace(
+                '{{- "Today Date: " + date_string + "\\n\\n" }}\n', ""
+            )
+        except Exception as e:
+            print(f"Error modifying chat_template: {e}")
 
     # Setup
     num_envs = len(envs)
