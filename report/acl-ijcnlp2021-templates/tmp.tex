@@ -1,0 +1,105 @@
+Below is an updated version of the **PPO + GAE** procedure (as implemented in TRL) that **includes a KL-divergence penalty** against some reference policy \(\pi_{\text{ref}}\). This KL term is incorporated directly into the reward at each token step. 
+
+---
+
+## Conceptual Overview
+
+1. **Generate a rollout**  
+   - Prompt: \(x\)  
+   - Sample a token sequence \(y = (y_1,\dots,y_T)\) from the current policy \(\pi_\theta\).
+
+2. **Compute a scalar score** \(S(x,y)\) (e.g., from a reward model).
+
+3. **Add KL penalty** to form the final token-level rewards.  
+   - At each token step \(t\), you subtract a term proportional to the KL between the current policy and the reference policy \(\pi_{\text{ref}}\).  
+   - In practice, TRL often approximates this KL by the log-prob difference on the sampled token \(y_t\).
+
+4. **Compute advantages** using Generalized Advantage Estimation (GAE).
+
+5. **Optimize** the PPO objective with the clipped probability ratio.
+
+Below are the **raw LaTeX** formulas (no code fences), so you can copy/paste directly into a \(\LaTeX\) document.
+
+---
+
+## Raw LaTeX Equations
+
+\[
+\textbf{(1) Generate sequence:} \quad 
+y = (y_1, \ldots, y_T) \;\sim\; \pi_\theta(\cdot \mid x).
+\]
+
+\[
+\textbf{(2) Scalar score:} \quad 
+S(x,y) \;\in\; \mathbb{R}.
+\]
+
+\[
+\textbf{(3) KL term at step } t: \quad 
+\mathrm{KL}_t \;=\; \log \pi_\theta\bigl(y_t \mid s_t\bigr) \;-\; \log \pi_{\text{ref}}\bigl(y_t \mid s_t\bigr),
+\]
+where \(s_t = (x, y_{1:t-1})\) denotes the “state” before taking token \(y_t\).
+
+\[
+\textbf{(4) Final reward at each token } t: \quad
+r_t \;=\; \delta_{t,T} \cdot S(x,y) \;-\; \beta \,\mathrm{KL}_t,
+\]
+where 
+\[
+\delta_{t,T} \;=\;
+\begin{cases}
+1, & t = T,\\
+0, & t < T,
+\end{cases}
+\]
+and \(\beta\) is a hyperparameter (the “KL coefficient”) that controls how strongly you penalize deviation from \(\pi_{\text{ref}}\).
+
+---
+
+### GAE Computation
+
+\[
+\textbf{(5) Value function:} \quad 
+V_\phi(s_t).
+\]
+
+\[
+\textbf{(6) Temporal-difference residual:} \quad 
+\delta_t \;=\; r_t + \gamma \, V_\phi(s_{t+1}) \;-\; V_\phi(s_t).
+\]
+
+\[
+\textbf{(7) GAE advantage:} \quad 
+A_t \;=\; \sum_{l=0}^{\,T-t-1} (\gamma \lambda)^l \,\delta_{t+l},
+\]
+where \(0 \le \lambda \le 1\) is the GAE parameter.
+
+---
+
+### PPO Objective
+
+\[
+\textbf{(8) Probability ratio:} \quad 
+r_t(\theta) \;=\; \frac{\pi_\theta\bigl(y_t \mid s_t\bigr)}{\pi_{\theta_{\text{old}}}\bigl(y_t \mid s_t\bigr)}.
+\]
+
+\[
+\textbf{(9) Clipped PPO objective:} \quad 
+\mathcal{L}^{\text{PPO}}(\theta) 
+\;=\; 
+\mathbb{E}\Bigl[
+\min\!\Bigl(
+r_t(\theta)\,A_t,\,\text{clip}\bigl(r_t(\theta), 1-\epsilon, 1+\epsilon\bigr)\,A_t
+\Bigr)
+\Bigr].
+\]
+
+Here, \(\theta_{\text{old}}\) are the policy parameters before the current update, and \(\epsilon\) is the clipping parameter (e.g., 0.1).
+
+---
+
+## Summary of the KL Inclusion
+
+- In TRL, a “KL penalty” is added to **every step’s** reward to keep the updated policy \(\pi_\theta\) close to a reference policy \(\pi_{\text{ref}}\).  
+- Practically, the reward at token \(t\) has two parts: the “environment” part (which, in many cases, is zero except for the final scalar \(S\) at \(t=T\)) **minus** a term \(\beta \,\mathrm{KL}_t\).  
+- GAE is then computed on these “KL-augmented” rewards, and standard PPO steps are taken to update \(\pi_\theta\).
