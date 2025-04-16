@@ -5,7 +5,7 @@
 
 ## Overview
 
-This repository explores the interplay between **reasoning**, **grounding**, and **reinforcement learning** in Large Language Models (LLMs). We investigate whether prompting LLM agents to *reason before action selection* improves sample efficiency and generalization during online reinforcement learning in BabyAI-Text environments.
+This repository explores the interplay between **reasoning**, **grounding**, and **reinforcement learning** in LLM-based agents. We investigate whether prompting LLM agents to *reason before action selection* improves sample efficiency and generalization during online reinforcement learning in BabyAI-Text environments.
 
 Our approach enables language models to generate actions token-by-token in text-based environments, applying reinforcement learning in a nested fashion to improve performance - a more direct approach than previous methods that compute relative probabilities for each action.
 
